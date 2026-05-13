@@ -6,6 +6,7 @@ from app.real_interview import logger
 from app.real_interview.backend.services.user_maintenance import (
     change_password,
     delete_user,
+    login_user,
     sign_up_user,
 )
 
@@ -60,6 +61,34 @@ def sign_up_user_route():
     logger.info("[user_maintenance][POST /api/users] invoking service")
     result = sign_up_user(email=email, password=password, confirm_password=confirm_password)  # type: ignore[arg-type]
     logger.info("[user_maintenance][POST /api/users] finished with status_code=%s", result.get("status_code"))
+    return _service_result_to_response(result)
+
+
+@user_maintenance_blueprint.route("/users/login", methods=["POST"])
+def login_user_route():
+    logger.info("[user_maintenance][POST /api/users/login] start")
+    body = _parse_json_body()
+    if body is None:
+        logger.warning("[user_maintenance][POST /api/users/login] invalid JSON body")
+        return jsonify({"error": "invalid JSON body"}), 400
+
+    email = body.get("email") or body.get("emailid")
+    password = body.get("password")
+
+    ok, missing = _require_str({"email": email, "password": password}, "email", "password")
+    if not ok:
+        logger.warning(
+            "[user_maintenance][POST /api/users/login] missing/invalid fields: %s",
+            missing,
+        )
+        return jsonify({"error": "missing required fields"}), 400
+
+    logger.info("[user_maintenance][POST /api/users/login] invoking service")
+    result = login_user(email=email, password=password)  # type: ignore[arg-type]
+    logger.info(
+        "[user_maintenance][POST /api/users/login] finished with status_code=%s",
+        result.get("status_code"),
+    )
     return _service_result_to_response(result)
 
 

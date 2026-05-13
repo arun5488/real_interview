@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Real Interview — Account &amp; Resume</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <h1>Real Interview</h1>
+      <p class="tagline">Sign up or sign in, then upload your resume (PDF).</p>
+    </header>
+
+    <main class="layout">
+      <section id="view-auth" class="card" aria-labelledby="auth-heading">
+        <h2 id="auth-heading">Account</h2>
+
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab is-active" data-tab="signup" role="tab" aria-selected="true">
+            Sign up
+          </button>
+          <button type="button" class="tab" data-tab="login" role="tab" aria-selected="false">
+            Log in
+          </button>
+        </div>
+
+        <div id="panel-signup" class="tab-panel" role="tabpanel">
+          <p class="hint">
+            Password: 8+ characters, with a letter, a number, and a special character.
+          </p>
+          <form id="form-signup" class="stack" novalidate>
+            <label>
+              Email
+              <input type="email" name="email" autocomplete="email" required />
+            </label>
+            <label>
+              Password
+              <input type="password" name="password" autocomplete="new-password" required />
+            </label>
+            <label>
+              Confirm password
+              <input type="password" name="confirm_password" autocomplete="new-password" required />
+            </label>
+            <button type="submit" class="btn primary">Create account</button>
+          </form>
+        </div>
+
+        <div id="panel-login" class="tab-panel is-hidden" role="tabpanel" hidden>
+          <form id="form-login" class="stack" novalidate>
+            <label>
+              Email
+              <input type="email" name="email" autocomplete="email" required />
+            </label>
+            <label>
+              Password
+              <input type="password" name="password" autocomplete="current-password" required />
+            </label>
+            <button type="submit" class="btn primary">Log in</button>
+          </form>
+        </div>
+
+        <p id="auth-message" class="message" role="status" aria-live="polite"></p>
+      </section>
+
+      <section id="view-upload" class="card is-hidden" aria-labelledby="upload-heading" hidden>
+        <h2 id="upload-heading">Upload resume</h2>
+        <p class="signed-in">
+          Signed in as user <code id="display-user-id"></code>
+          <button type="button" id="btn-sign-out" class="btn link">Sign out</button>
+        </p>
+        <form id="form-upload" class="stack" enctype="multipart/form-data" novalidate>
+          <label>
+            PDF file
+            <input type="file" name="resume" accept="application/pdf,.pdf" required />
+          </label>
+          <button type="submit" class="btn primary">Upload and process</button>
+        </form>
+        <p id="upload-message" class="message" role="status" aria-live="polite"></p>
+        <pre id="upload-result" class="result is-hidden" aria-label="Server response"></pre>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>Uses <code>/api/users</code>, <code>/api/users/login</code>, and <code>/api/resumes</code>.</span>
+    </footer>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

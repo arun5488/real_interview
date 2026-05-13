@@ -142,6 +142,59 @@ def sign_up_user(email: str, password: str, confirm_password: str) -> Dict[str, 
             client.close()
 
 
+def login_user(email: str, password: str) -> Dict[str, Any]:
+    """
+    POST: sign in with email and password.
+
+    Response: user_id on success.
+
+    Error codes:
+      401 - invalid email or password
+    """
+    logger.info("[user_maintenance][POST] login_user start")
+    client = None
+
+    try:
+        if not isinstance(email, str) or not email.strip():
+            logger.warning("[user_maintenance][POST] login invalid email")
+            return _error(401, "invalid email or password")
+
+        if not isinstance(password, str) or not password:
+            logger.warning("[user_maintenance][POST] login invalid password")
+            return _error(401, "invalid email or password")
+
+        client, collection = _get_client_and_collection()
+
+        user_doc = collection.find_one({"email": email.strip()})
+        if not user_doc:
+            logger.warning("[user_maintenance][POST] login user not found")
+            return _error(401, "invalid email or password")
+
+        stored_hash = user_doc.get("password")
+        if not stored_hash or not isinstance(stored_hash, str):
+            logger.warning("[user_maintenance][POST] login missing password hash")
+            return _error(401, "invalid email or password")
+
+        if not _check_password(password, stored_hash):
+            logger.warning("[user_maintenance][POST] login password mismatch")
+            return _error(401, "invalid email or password")
+
+        user_id = str(user_doc["_id"])
+        logger.info("[user_maintenance][POST] login success for user_id=%s", user_id)
+        return _success(200, {"user_id": user_id, "message": "signed in successfully"})
+
+    except PyMongoError:
+        logger.exception("[user_maintenance][POST] login MongoDB error")
+        raise
+    except Exception:
+        logger.exception("[user_maintenance][POST] login unexpected error")
+        raise
+    finally:
+        if client is not None:
+            logger.info("[user_maintenance][POST] closing MongoDB connection")
+            client.close()
+
+
 def change_password(
     email: str,
     new_password: str,
