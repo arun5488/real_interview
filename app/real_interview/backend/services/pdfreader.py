@@ -265,3 +265,70 @@ class resume_reader:
         data = stream.read()
         self.validate_pdf_file(data=data, filename=filename, content_type=content_type)
         return data
+
+    def list_resumes_for_user(self, userid: Union[str, ObjectId]) -> List[Dict[str, Any]]:
+        """Return resume summaries for a user, newest upload first."""
+        logger.info("inside list_resumes_for_user")
+        user_oid = _as_user_object_id(userid)
+        self.ensure_resume_collection()
+        cursor = (
+            self._collection()
+            .find(
+                {"userid": user_oid},
+                {"uploaded_ts": 1, "parsed_data.name": 1, "resume_file.filename": 1},
+            )
+            .sort("uploaded_ts", -1)
+        )
+        items: List[Dict[str, Any]] = []
+        for doc in cursor:
+            ts = doc.get("uploaded_ts")
+            parsed = doc.get("parsed_data") or {}
+            resume_file = doc.get("resume_file") or {}
+            filename = (resume_file.get("filename") or "").strip()
+            name = (parsed.get("name") or "").strip() if isinstance(parsed, dict) else ""
+            label = filename or name or "Resume"
+            uploaded_ts = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+            items.append(
+                {
+                    "resume_id": str(doc["_id"]),
+                    "uploaded_ts": uploaded_ts,
+                    "label": label,
+                }
+            )
+        logger.info("[resume_reader] listed %s resume(s) for user %s", len(items), user_oid)
+        return items
+
+    def get_resume_for_user(
+        self,
+        userid: Union[str, ObjectId],
+        resume_id: Union[str, ObjectId],
+    ) -> Dict[str, Any]:
+        """Return one resume document for a user (includes parsed_data)."""
+        logger.info("inside get_resume_for_user")
+        user_oid = _as_user_object_id(userid)
+        resume_oid = _as_user_object_id(resume_id)
+        doc = self._collection().find_one(
+            {"_id": resume_oid, "userid": user_oid},
+            {"raw_text": 0},
+        )
+        if not doc:
+            raise ValueError("resume not found for this user")
+
+        ts = doc.get("uploaded_ts")
+        parsed_data = doc.get("parsed_data")
+        if not isinstance(parsed_data, dict):
+            parsed_data = _default_parsed_data()
+
+        resume_file = doc.get("resume_file") or {}
+        filename = (resume_file.get("filename") or "").strip()
+        name = (parsed_data.get("name") or "").strip()
+        label = filename or name or "Resume"
+
+        return {
+            "resume_id": str(doc["_id"]),
+            "userid": str(user_oid),
+            "uploaded_ts": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+            "label": label,
+            "parsed_data": parsed_data,
+            "resume_file": resume_file,
+        }

@@ -9,7 +9,7 @@
   <body>
     <header class="site-header">
       <h1>Real Interview</h1>
-      <p class="tagline">Sign up or sign in, then upload your resume (PDF).</p>
+      <p class="tagline">Sign up, upload your resume, then add the job you are applying for.</p>
     </header>
 
     <main class="layout">
@@ -66,23 +66,107 @@
       <section id="view-upload" class="card is-hidden" aria-labelledby="upload-heading" hidden>
         <h2 id="upload-heading">Upload resume</h2>
         <p class="signed-in">
-          Signed in as user <code id="display-user-id"></code>
+          Signed in as <code id="display-user-email"></code>
           <button type="button" id="btn-sign-out" class="btn link">Sign out</button>
         </p>
+        <div class="upload-actions">
+          <button type="button" id="btn-fetch-resume" class="btn secondary">Fetch resume</button>
+        </div>
+        <div id="resume-list-wrap" class="resume-list-wrap is-hidden" hidden aria-live="polite">
+          <table id="resume-table" class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Date</th>
+                <th scope="col">Resume</th>
+              </tr>
+            </thead>
+            <tbody id="resume-table-body"></tbody>
+          </table>
+        </div>
+        <label id="resume-selected-wrap" class="stack resume-selected-wrap is-hidden" hidden>
+          Selected resume
+          <textarea id="resume-parsed-display" readonly rows="12" aria-label="Parsed resume data"></textarea>
+        </label>
+        <button type="button" id="btn-continue-job" class="btn primary is-hidden" hidden>
+          Continue to job application
+        </button>
         <form id="form-upload" class="stack" enctype="multipart/form-data" novalidate>
+          <p class="hint">Or upload a new PDF resume.</p>
           <label>
             PDF file
-            <input type="file" name="resume" accept="application/pdf,.pdf" required />
+            <input type="file" name="resume" accept="application/pdf,.pdf" />
           </label>
           <button type="submit" class="btn primary">Upload and process</button>
         </form>
         <p id="upload-message" class="message" role="status" aria-live="polite"></p>
-        <pre id="upload-result" class="result is-hidden" aria-label="Server response"></pre>
+      </section>
+
+      <section id="view-job-application" class="card is-hidden" aria-labelledby="job-heading" hidden>
+        <h2 id="job-heading">Job application</h2>
+        <p class="signed-in">
+          Signed in as <code id="display-user-email-job"></code>
+          <button type="button" id="btn-sign-out-job" class="btn link">Sign out</button>
+        </p>
+        <p class="hint">
+          Provide a job posting link or paste the job description. We will extract the role and store an
+          agent-readable summary.
+        </p>
+
+        <div class="tabs job-input-tabs" role="tablist" aria-label="Job input mode">
+          <button
+            type="button"
+            class="tab is-active job-mode-tab"
+            data-job-mode="link"
+            role="tab"
+            aria-selected="true"
+          >
+            Job link
+          </button>
+          <button
+            type="button"
+            class="tab job-mode-tab"
+            data-job-mode="description"
+            role="tab"
+            aria-selected="false"
+          >
+            Job description
+          </button>
+        </div>
+
+        <form id="form-job-application" class="stack" novalidate>
+          <div id="panel-job-link" class="tab-panel" role="tabpanel">
+            <label>
+              Application link
+              <input
+                type="url"
+                name="application_link"
+                placeholder="https://company.com/careers/role"
+                autocomplete="url"
+              />
+            </label>
+          </div>
+          <div id="panel-job-description" class="tab-panel is-hidden" role="tabpanel" hidden>
+            <label>
+              Job description
+              <textarea
+                name="job_description_text"
+                rows="10"
+                placeholder="Paste the full job description here…"
+              ></textarea>
+            </label>
+          </div>
+          <button type="submit" class="btn primary">Save job application</button>
+        </form>
+        <p id="job-message" class="message" role="status" aria-live="polite"></p>
+        <pre id="job-result" class="result is-hidden" aria-label="Server response"></pre>
       </section>
     </main>
 
     <footer class="site-footer">
-      <span>Uses <code>/api/users</code>, <code>/api/users/login</code>, and <code>/api/resumes</code>.</span>
+      <span
+        >Uses <code>/api/users</code>, <code>/api/resumes</code>, and
+        <code>/api/job-applications</code>.</span
+      >
     </footer>
 
     <script src="/app.js" defer></script>

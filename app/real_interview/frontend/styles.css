@@ -124,7 +124,9 @@ body {
 
 input[type="email"],
 input[type="password"],
-input[type="file"] {
+input[type="url"],
+input[type="file"],
+textarea {
   padding: 0.55rem 0.65rem;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -135,6 +137,17 @@ input[type="file"] {
 
 input[type="file"] {
   padding: 0.45rem;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 8rem;
+  font: inherit;
+  line-height: 1.45;
+}
+
+.job-input-tabs {
+  margin-bottom: 0.85rem;
 }
 
 .btn {
@@ -158,6 +171,72 @@ input[type="file"] {
 .btn.primary:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.btn.secondary {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.btn.secondary:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.upload-actions {
+  margin-bottom: 0.85rem;
+}
+
+.resume-list-wrap {
+  margin-bottom: 1rem;
+  overflow-x: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.data-table th,
+.data-table td {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.data-table th {
+  background: var(--bg);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.data-table tbody tr.is-selected {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.resume-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.resume-selected-wrap {
+  margin-bottom: 0.85rem;
+}
+
+#resume-parsed-display {
+  font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+  font-size: 0.8rem;
+}
+
+#btn-continue-job {
+  margin-bottom: 1rem;
 }
 
 .btn.link {

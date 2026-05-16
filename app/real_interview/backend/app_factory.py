@@ -3,7 +3,11 @@ from pathlib import Path
 from flask import Flask, send_from_directory
 
 from app.real_interview import logger
-from app.real_interview.backend.routes import resume_blueprint, user_maintenance_blueprint
+from app.real_interview.backend.routes import (
+    job_application_blueprint,
+    resume_blueprint,
+    user_maintenance_blueprint,
+)
 
 _FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -17,6 +21,9 @@ def create_app() -> Flask:
 
     logger.info("[app_factory] registering resume blueprint")
     app.register_blueprint(resume_blueprint)
+
+    logger.info("[app_factory] registering job_application blueprint")
+    app.register_blueprint(job_application_blueprint)
 
     @app.route("/", methods=["GET"])
     def serve_ui_index():

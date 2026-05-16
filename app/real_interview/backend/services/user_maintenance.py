@@ -128,7 +128,10 @@ def sign_up_user(email: str, password: str, confirm_password: str) -> Dict[str, 
 
         user_id = str(result.inserted_id)
         logger.info(f"[user_maintenance][POST] user created successfully: {user_id}")
-        return _success(201, {"user_id": user_id, "message": "user created successfully"})
+        return _success(
+            201,
+            {"user_id": user_id, "email": email.strip(), "message": "user created successfully"},
+        )
 
     except PyMongoError:
         logger.exception("[user_maintenance][POST] MongoDB error")
@@ -180,8 +183,12 @@ def login_user(email: str, password: str) -> Dict[str, Any]:
             return _error(401, "invalid email or password")
 
         user_id = str(user_doc["_id"])
+        user_email = user_doc.get("email") or email.strip()
         logger.info("[user_maintenance][POST] login success for user_id=%s", user_id)
-        return _success(200, {"user_id": user_id, "message": "signed in successfully"})
+        return _success(
+            200,
+            {"user_id": user_id, "email": user_email, "message": "signed in successfully"},
+        )
 
     except PyMongoError:
         logger.exception("[user_maintenance][POST] login MongoDB error")
