@@ -2,7 +2,7 @@ import io
 import os
 import re
 from datetime import datetime, timezone
-from typing import Any, BinaryIO, Dict, List, Optional, Union
+from typing import Any, BinaryIO, Dict, List, Optional, Tuple, Union
 
 import gridfs
 from bson import ObjectId
@@ -332,3 +332,39 @@ class resume_reader:
             "parsed_data": parsed_data,
             "resume_file": resume_file,
         }
+
+    def delete_all_resumes_for_user(self, userid: Union[str, ObjectId]) -> Tuple[int, int]:
+        """
+        Delete all resume documents and associated GridFS files for a user.
+
+        Returns (resume_docs_deleted, gridfs_files_deleted).
+        """
+        logger.info("[resume_reader] delete_all_resumes_for_user")
+        user_oid = _as_user_object_id(userid)
+        self.ensure_resume_collection()
+        cursor = self._collection().find(
+            {"userid": user_oid},
+            {"resume_file": 1},
+        )
+        gridfs_deleted = 0
+        for doc in cursor:
+            resume_file = doc.get("resume_file") or {}
+            file_id_str = resume_file.get("file_id")
+            if file_id_str:
+                try:
+                    self._fs.delete(ObjectId(file_id_str))
+                    gridfs_deleted += 1
+                except (InvalidId, Exception):
+                    logger.warning(
+                        "[resume_reader] could not delete GridFS file_id=%s",
+                        file_id_str,
+                    )
+        result = self._collection().delete_many({"userid": user_oid})
+        docs_deleted = int(result.deleted_count)
+        logger.info(
+            "[resume_reader] deleted %s resume(s) and %s GridFS file(s) for user %s",
+            docs_deleted,
+            gridfs_deleted,
+            user_oid,
+        )
+        return docs_deleted, gridfs_deleted

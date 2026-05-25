@@ -4,6 +4,7 @@ from flask import Flask, send_from_directory
 
 from app.real_interview import logger
 from app.real_interview.backend.routes import (
+    interview_blueprint,
     job_application_blueprint,
     resume_blueprint,
     user_maintenance_blueprint,
@@ -24,6 +25,9 @@ def create_app() -> Flask:
 
     logger.info("[app_factory] registering job_application blueprint")
     app.register_blueprint(job_application_blueprint)
+
+    logger.info("[app_factory] registering interview blueprint")
+    app.register_blueprint(interview_blueprint)
 
     @app.route("/", methods=["GET"])
     def serve_ui_index():

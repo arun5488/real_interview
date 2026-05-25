@@ -1,182 +1,63 @@
 # Real Interview
 
-Flask application for user accounts, resume upload and parsing, and job application capture. The web UI is served from the same server as the REST APIs.
+Flask application that guides a candidate from account setup through resume upload, job application, and an AI-driven mock interview. The web UI is served from the same server as the backend.
+
+## 🎯 Vision
+Build an Agentic AI application that simulates mock interviews based on a candidate’s resume and job description.  
+Initial form: **chat-based app** → later extended with analytics, personalization, and enterprise features.
 
 ## Project layout
 
 ```
 app/real_interview/
 ├── backend/
-│   ├── app_factory.py      # Flask app and blueprint registration
-│   ├── server.py           # Entry point (run this to start the server)
-│   ├── routes/             # HTTP API blueprints
-│   ├── services/           # Business logic and MongoDB access
-│   ├── agents/             # LLM structured-extraction agents
-│   ├── llm/                # OpenAI model configuration
-│   └── utils/              # Shared helpers (e.g. MongoDB connection)
-└── frontend/               # Static UI (HTML, CSS, JavaScript)
+│   ├── app_factory.py          # Flask app, blueprint registration, static UI routes
+│   ├── server.py               # Entry point — run this to start the server
+│   ├── routes/                 # HTTP layer (users, resumes, jobs, interview)
+│   ├── services/               # Business logic and MongoDB persistence
+│   ├── agents/                 # LLM agents (resume, job, interview panel)
+│   ├── graphs/                 # LangGraph interview workflows
+│   ├── nodes/                  # LangGraph node implementations
+│   ├── state/                  # Typed state and Pydantic schemas for the pipeline
+│   ├── tools/                  # External tools (e.g. Tavily web search)
+│   ├── config/                 # Loads params.yaml for interview tuning
+│   ├── llm/                    # OpenAI client wrapper
+│   └── utils/                  # MongoDB connection and shared helpers
+├── frontend/                   # Static UI (HTML, CSS, JavaScript)
+└── data/                       # Reserved data paths (config, transcripts, etc.)
+
+params.yaml                     # Interview summarizer/feedback thresholds (project root)
 ```
+
+---
 
 ## Modules
 
-### Backend core
-
-| Module | Purpose |
-|--------|---------|
-| `app_factory.py` | Creates the Flask app, registers API blueprints, serves the frontend at `/`, `/styles.css`, `/app.js`. |
-| `server.py` | Starts the development server (`HOST`, `PORT` from environment). |
-| `utils/mongodb.py` | Connects to MongoDB using `MONGODB_URI`. |
-
-### Routes (`backend/routes/`)
-
-Thin HTTP layer: validates input, calls services, returns JSON.
-
-| File | Prefix |
-|------|--------|
-| `user_maintenance_routes.py` | `/api` |
-| `resume_routes.py` | `/api` |
-| `job_application_routes.py` | `/api` |
-
-### Services (`backend/services/`)
-
-| Module | Purpose |
-|--------|---------|
-| `user_maintenance.py` | Sign up, login, password change, delete user. Stores users in the `authentications` collection (bcrypt passwords). |
-| `pdfreader.py` | `resume_reader` class: PDF validation, GridFS storage, text extraction, resume CRUD per user. |
-| `job_application.py` | Saves job applications: fetches job URLs (when possible), normalizes descriptions, writes to `job_application` collection. |
-
-### Agents (`backend/agents/`)
-
-| Module | Purpose |
-|--------|---------|
-| `resume_parse_agent.py` | Uses OpenAI structured output to turn resume text into `parsed_data` (name, experience, skills, etc.). |
-| `job_application_agent.py` | Extracts `job_role` and agent-readable `job_description` from posting text or scraped HTML. |
-
-### LLM (`backend/llm/`)
-
-| Module | Purpose |
-|--------|---------|
-| `openaillm.py` | Loads `OPENAI_API_KEY` and returns a `ChatOpenAI` instance (`gpt-4o-mini`). Used by both agents. |
-
-### Frontend (`frontend/`)
-
-| File | Purpose |
-|------|---------|
-| `index.html` | Account, resume upload/fetch, and job application views. |
-| `app.js` | UI flow, session storage (`user_id`, email, selected `resume_id`), API calls. |
-| `styles.css` | Layout and styling. |
-
-### Reserved (not used yet)
-
-`backend/nodes/`, `backend/state/`, `backend/tools/` — placeholders for a future LangGraph-style pipeline.
-
 ---
 
-## APIs
+## 🚀 Phase 1: MVP (3–4 months)
+**Objective:** Deliver a secure, working chat-based mock interview app.
 
-All JSON APIs are under `/api`. The UI uses these endpoints; you can also call them directly (e.g. with Postman).
+### Features
+- Resume upload (PDF/DOC).
+- Job description input parsing.
+- Chat interview simulation.
+- Feedback summary (strengths, weaknesses, improvements).
 
-### Users — `user_maintenance_routes.py`
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/users` | Sign up. Body: `email`, `password`, `confirm_password`. Returns `user_id`, `email`. |
-| `POST` | `/api/users/login` | Log in. Body: `email`, `password`. Returns `user_id`, `email`. |
-| `PUT` | `/api/users/password` | Change password. Body: `email`, `new_password`, `confirm_new_password`. |
-| `DELETE` | `/api/users` | Delete account. Body: `email`, `password`. |
-
-### Resumes — `resume_routes.py`
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/resumes?userid={id}` | List resumes for a user (newest first). Returns `resumes[]` with `resume_id`, `uploaded_ts`, `label`. |
-| `GET` | `/api/resumes/{resume_id}?userid={id}` | Get one resume including `parsed_data`. |
-| `POST` | `/api/resumes` | Upload a PDF. Multipart form: `userid`, file field `resume` (or `file` / `pdf`). Returns parsed resume metadata (no `raw_text` in response). |
-
-### Job applications — `job_application_routes.py`
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/job-applications` | Save a job application. JSON body: |
-
-**Link mode**
-
-```json
-{
-  "customer_id": "<user ObjectId>",
-  "input_mode": "link",
-  "application_link": "https://..."
-}
-```
-
-**Description mode** (when the site blocks fetching, or user pastes text)
-
-```json
-{
-  "customer_id": "<user ObjectId>",
-  "input_mode": "description",
-  "job_description_text": "..."
-}
-```
-
-Response includes `job_role`, `application_link` (`"NA"` in description mode), `job_description`, `job_application_ts`.
-
-On blocked URLs: `422` with `error_code: "job_url_blocked"` and `suggest_input_mode: "description"`.
-
-### UI (static)
-
-| Method | Path |
-|--------|------|
-| `GET` | `/` |
-| `GET` | `/styles.css` |
-| `GET` | `/app.js` |
-
----
-
-## MongoDB collections
-
-| Collection | Env variable (default) | Contents |
-|----------|------------------------|----------|
-| Users | `MONGODB_COLLECTION_USERS` (`authentications`) | Email, password hash |
-| Resumes | `MONGODB_COLLECTION_RESUMES` | `userid`, `parsed_data`, `raw_text`, GridFS file ref, `uploaded_ts` |
-| Job applications | `MONGODB_COLLECTION_JOB_APPLICATIONS` (`job_application`) | `customer_id`, `job_role`, `application_link`, `job_description`, `job_application_ts` |
-
-Resume PDF binaries are stored in GridFS (`MONGODB_GRIDFS_RESUME_BUCKET`, default `resume_pdf_fs`).
-
----
-
-## Environment variables
-
-Create a `.env` file in the project root:
-
-```env
-MONGODB_URI=mongodb://localhost:27017
-MONGODB_DB_NAME=real_interview
-MONGODB_COLLECTION_USERS=authentications
-MONGODB_COLLECTION_RESUMES=resumes
-MONGODB_COLLECTION_JOB_APPLICATIONS=job_application
-MONGODB_GRIDFS_RESUME_BUCKET=resume_pdf_fs
-
-OPENAI_API_KEY=your-key-here
-
-# Optional
-PORT=5000
-HOST=0.0.0.0
-RESUME_PARSE_MAX_CHARS=14000
-JOB_APPLICATION_MAX_CHARS=16000
-```
+**Do not commit `.env`** — it contains secrets. Use `.env_copy` or similar as a template without real keys.
 
 ---
 
 ## Launch the application
 
-### 1. Prerequisites
+### Prerequisites
 
 - Python 3.10+
 - MongoDB running and reachable via `MONGODB_URI`
-- OpenAI API key
+- Valid `OPENAI_API_KEY` and `TAVILY_API_KEY` in `.env`
 
-### 2. Install dependencies
+### Install dependencies
 
 From the project root:
 
@@ -198,11 +79,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Configure environment
-
-Add `.env` in the project root (see [Environment variables](#environment-variables)).
-
-### 4. Start the server
+### Start the server
 
 From the project root with the virtual environment activated:
 
@@ -210,23 +87,117 @@ From the project root with the virtual environment activated:
 python -m app.real_interview.backend.server
 ```
 
-### 5. Open the app
+### Open the UI
 
-In a browser:
+In your browser:
 
 ```
 http://localhost:5000
 ```
 
-### 6. Typical flow in the UI
+Use port **5000** unless you set `PORT` to something else in `.env`.
+
+### Typical flow in the UI
 
 1. **Sign up** or **Log in**
-2. **Upload resume** (PDF) or **Fetch resume** to reuse an existing one
-3. **Continue to job application** — provide a job link or paste a job description
-4. **Sign out** clears the session (including the selected resume)
+2. **Upload resume** (PDF) or **Fetch resume** to select an existing one
+3. **Continue to job application** — job link or pasted description, then save
+4. **Start interview** — HR summary and panel load; chat with interviewers (`[I1]`, `[I2]`, …)
+5. **Pause interview** — conversation is summarized and saved; resume later with that context
+6. **Resume interview** — continue the same session
+7. **Next interviewer** / **End interview** when appropriate; feedback appears after completion
+8. **Sign out** clears the browser session
+
+---
+
+## Sample interview
+
+The example below is **illustrative** — actual questions and tone depend on your resume, job description, and which interviewer types the router assigns (`positive`, `negative`, `objective`). In the chat UI, interviewers appear as **`[I1]`**, **`[I2]`**, etc.
+
+### Setup (before chat)
+
+| Step | What you provide | What the app does |
+|------|------------------|-------------------|
+| Resume | PDF for a backend engineer with Python and API experience | Parses skills, roles, and projects |
+| Job | Description for *Senior Backend Engineer* (Python, REST, MongoDB) | Extracts role and requirements |
+| Start | Click **Start interview** | HR agent writes a first impression; router picks panel size (1 or 2) and interviewer styles |
+
+**HR first impression (shown under “HR summary & panel”) — excerpt:**
+
+> Alex Chen aligns well with the Senior Backend Engineer role: five years of Python services, REST APIs, and MongoDB in production. Resume shows ownership of a payments microservice and on-call rotation. Gaps vs. the posting: limited mention of Kubernetes and no explicit load-testing experience. Recommended focus for the panel: system design, failure handling, and data modeling.
+
+**Panel plan (example for a mid/senior candidate):**
+
+```json
+{
+  "experience_level": "senior",
+  "panel_size": 2,
+  "selected_interviewers": ["positive", "objective"],
+  "routing_rationale": "Senior profile warrants two interviewers: supportive technical depth plus process-oriented follow-up."
+}
+```
+
+### Chat transcript (excerpt)
+
+```
+[I1]: Hi Alex, I'm on the engineering panel. I've reviewed your background on the payments service —
+     great work. Let's start simple: how would you design a REST endpoint to create a payment idempotently?
+
+You: I'd use a client-supplied idempotency key in a header, store keys in Redis or Mongo with TTL,
+     and return the same response if the key repeats within 24 hours.
+
+[I1]: Good. What happens if Mongo is down during the idempotency check?
+
+You: Fail fast with 503, don't double-charge; retry from the client with the same key.
+
+[I1]: Makes sense. Can you walk through how you'd index the idempotency collection?
+
+You: Unique index on (user_id, idempotency_key), maybe shard by user_id at scale.
+
+[I2]: Switching to process — describe how you handled a production incident on that service.
+
+You: We had elevated 5xx after a deploy; rolled back, traced to a connection pool misconfiguration,
+     added alerts on pool saturation and a runbook step for pool sizing.
+
+[I2]: Who was in the loop, and what did you change in the release process afterward?
+
+You: On-call, PM for customer comms, postmortem within 48h; added staging load test and canary deploy.
+```
+
+### Pause and resume
+
+After a few more exchanges, the candidate clicks **Pause interview**. The summarizer runs on the conversation so far and appends to `interview_summary`, for example:
+
+> **Saved summary (excerpt):** Candidate explained idempotent payments with header keys and unique indexes; discussed 503 behavior when dependencies fail. Second interviewer covered a production rollback, stakeholder communication, and post-incident process improvements (canary, load test).
+
+Status becomes **paused**; chat input is disabled until **Resume interview**. On resume, that summary is injected as context for the next interviewer turns so the panel does not “forget” earlier answers.
+
+### End interview — sample feedback
+
+After **End interview**, the feedback agent may produce structured output like:
+
+```json
+{
+  "overall_assessment": "Strong technical communication and relevant backend experience; process answers were concrete.",
+  "strengths": [
+    "Clear idempotency and indexing explanation",
+    "Honest failure-mode thinking (503, no double-charge)",
+    "Structured incident narrative with follow-up process changes"
+  ],
+  "areas_to_improve": [
+    "Expand on Kubernetes and observability if targeting this exact posting",
+    "Quantify impact of the incident (duration, customers affected)"
+  ],
+  "recommendation": "Continue practicing system design under time pressure and deepen cloud-native tooling stories.",
+  "interview_decision": "hold",
+  "detailed_feedback": "You demonstrated solid API design instincts and mature incident handling. To move from hold to selected for a senior backend role, add more depth on scaling, SLOs, and platform operations aligned with the job description."
+}
+```
+
+This feedback appears in the UI under **Post-interview feedback**; the full message history and summaries remain in MongoDB for that session.
 
 ---
 
 ## Dependencies
 
-See `requirements.txt`: Flask, PyMongo, bcrypt, pypdf, langchain-openai, python-dotenv.
+See `requirements.txt`: Flask, PyMongo, bcrypt, pypdf, python-dotenv, PyYAML, langchain-openai, langgraph, langchain-core, tavily-python.

@@ -1,0 +1,11 @@
+interview:
+  summarizer:
+    # Approximate tokens in chat before summarizer runs (chars / 4 used internally).
+    token_threshold: 1500
+    # Max characters for the combined interview_summary stored in MongoDB.
+    max_summary_chars: 8000
+    # Max characters of transcript sent to the summarizer per pass.
+    input_max_chars: 16000
+  feedback:
+    # When true, feedback agent prioritizes interview_summary over full transcript.
+    use_summary_primary: true

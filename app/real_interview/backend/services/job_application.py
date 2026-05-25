@@ -304,3 +304,35 @@ def submit_job_application(
     finally:
         if client is not None:
             client.close()
+
+
+def get_job_application_for_customer(
+    customer_id: str,
+    job_application_id: str,
+) -> Dict[str, Any]:
+    """Load one job application document owned by the customer."""
+    logger.info("[job_application] get_job_application_for_customer start")
+    client = None
+    try:
+        customer_oid = _as_customer_object_id(customer_id)
+        app_oid = _as_customer_object_id(job_application_id)
+        client, users_coll, job_coll = _get_collections()
+        if not _customer_exists(users_coll, customer_oid):
+            raise ValueError("customer not found")
+
+        doc = job_coll.find_one({"_id": app_oid, "customer_id": customer_oid})
+        if not doc:
+            raise ValueError("job application not found for this user")
+
+        ts = doc.get("job_application_ts")
+        return {
+            "job_application_id": str(doc["_id"]),
+            "customer_id": str(customer_oid),
+            "job_role": (doc.get("job_role") or "").strip(),
+            "application_link": (doc.get("application_link") or "").strip(),
+            "job_description": (doc.get("job_description") or "").strip(),
+            "job_application_ts": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+        }
+    finally:
+        if client is not None:
+            client.close()

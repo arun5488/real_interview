@@ -58,6 +58,61 @@
             </label>
             <button type="submit" class="btn primary">Log in</button>
           </form>
+          <p class="auth-link-row">
+            <button type="button" id="link-reset-password" class="btn link">Reset password</button>
+            <span class="auth-link-sep">·</span>
+            <button type="button" id="link-delete-account" class="btn link danger-link">Delete account</button>
+          </p>
+        </div>
+
+        <div id="panel-reset-password" class="tab-panel is-hidden" role="tabpanel" hidden>
+          <p class="hint">
+            Enter the email for your account and choose a new password. Password: 8+ characters, with a
+            letter, a number, and a special character.
+          </p>
+          <form id="form-reset-password" class="stack" novalidate>
+            <label>
+              Email
+              <input type="email" name="email" autocomplete="email" required />
+            </label>
+            <label>
+              New password
+              <input type="password" name="new_password" autocomplete="new-password" required />
+            </label>
+            <label>
+              Confirm new password
+              <input type="password" name="confirm_new_password" autocomplete="new-password" required />
+            </label>
+            <button type="submit" class="btn primary">Reset password</button>
+          </form>
+          <p class="auth-link-row">
+            <button type="button" id="link-back-to-login" class="btn link">Back to log in</button>
+          </p>
+        </div>
+
+        <div id="panel-delete-account" class="tab-panel is-hidden" role="tabpanel" hidden>
+          <p class="hint danger-hint">
+            Permanently deletes your account and all related data: resumes, job applications, and
+            interview records. This cannot be undone.
+          </p>
+          <form id="form-delete-account" class="stack" novalidate>
+            <label>
+              Email
+              <input type="email" name="email" autocomplete="email" required />
+            </label>
+            <label>
+              Password
+              <input type="password" name="password" autocomplete="current-password" required />
+            </label>
+            <label class="confirm-delete">
+              <input type="checkbox" name="confirm_delete" required />
+              I understand this will permanently delete my account and data
+            </label>
+            <button type="submit" class="btn danger">Delete account permanently</button>
+          </form>
+          <p class="auth-link-row">
+            <button type="button" id="link-back-from-delete" class="btn link">Back to log in</button>
+          </p>
         </div>
 
         <p id="auth-message" class="message" role="status" aria-live="polite"></p>
@@ -159,12 +214,54 @@
         </form>
         <p id="job-message" class="message" role="status" aria-live="polite"></p>
         <pre id="job-result" class="result is-hidden" aria-label="Server response"></pre>
+        <button type="button" id="btn-start-interview" class="btn primary is-hidden" hidden>
+          Start interview
+        </button>
+      </section>
+
+      <section id="view-interview-chat" class="card is-hidden" aria-labelledby="chat-heading" hidden>
+        <h2 id="chat-heading">Interview</h2>
+        <p class="signed-in">
+          Signed in as <code id="display-user-email-chat"></code>
+          <span class="session-label">Session <code id="display-session-id"></code></span>
+          <button type="button" id="btn-sign-out-chat" class="btn link">Sign out</button>
+        </p>
+        <details id="interview-context-details" class="interview-context">
+          <summary>HR summary &amp; panel</summary>
+          <pre id="interview-context-preview" class="result"></pre>
+        </details>
+        <div id="chat-messages" class="chat-messages" role="log" aria-live="polite" aria-relevant="additions"></div>
+        <form id="form-chat" class="chat-form" novalidate>
+          <label class="sr-only" for="chat-input">Your message</label>
+          <input
+            id="chat-input"
+            type="text"
+            name="message"
+            placeholder="Type your answer…"
+            autocomplete="off"
+            required
+          />
+          <button type="submit" class="btn primary">Send</button>
+        </form>
+        <div class="chat-actions">
+          <button type="button" id="btn-pause-interview" class="btn secondary">Pause interview</button>
+          <button type="button" id="btn-resume-interview" class="btn secondary is-hidden" hidden>
+            Resume interview
+          </button>
+          <button type="button" id="btn-advance-interviewer" class="btn secondary">Next interviewer</button>
+          <button type="button" id="btn-end-interview" class="btn secondary">End interview</button>
+        </div>
+        <p id="chat-message" class="message" role="status" aria-live="polite"></p>
+        <div id="interview-feedback-wrap" class="interview-feedback-wrap is-hidden" hidden>
+          <h3>Post-interview feedback</h3>
+          <pre id="interview-feedback" class="result"></pre>
+        </div>
       </section>
     </main>
 
     <footer class="site-footer">
       <span
-        >Uses <code>/api/users</code>, <code>/api/resumes</code>, and
+        >Uses <code>/api/users</code>, <code>/api/users/password</code>, <code>/api/resumes</code>, and
         <code>/api/job-applications</code>.</span
       >
     </footer>

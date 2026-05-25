@@ -270,61 +270,12 @@ def change_password(
 
 def delete_user(email: str, password: str) -> Dict[str, Any]:
     """
-    DELETE: delete user
+    DELETE: remove user from authentications and cascade-delete related data.
 
-    Input: emailid, password
-    Response: user deleted successfully
-
-    Error codes:
-      422 - email does not exist
-      423 - password mismatch or weak password
+    Delegates to user_delete_service (resumes, job_application, interview).
     """
-    logger.info("[user_maintenance][DELETE] delete_user start")
-    client = None
+    from app.real_interview.backend.services.user_delete_service import delete_user_account
 
-    try:
-        if not isinstance(email, str) or not email.strip():
-            logger.warning("[user_maintenance][DELETE] invalid email input")
-            return _error(422, "email doesnt exist")
-
-        client, collection = _get_client_and_collection()
-
-        logger.info(f"[user_maintenance][DELETE] checking if user exists: {email}")
-        user_doc = collection.find_one({"email": email})
-        if not user_doc:
-            logger.warning("[user_maintenance][DELETE] email doesnt exist")
-            return _error(422, "email doesnt exist")
-
-        if not _password_meets_complexity(password):
-            logger.warning("[user_maintenance][DELETE] weak password")
-            return _error(423, "password mismatch or weak password")
-
-        stored_hash = user_doc.get("password")
-        if not stored_hash or not isinstance(stored_hash, str):
-            logger.warning("[user_maintenance][DELETE] stored password hash missing/invalid")
-            return _error(423, "password mismatch or weak password")
-
-        if not _check_password(password, stored_hash):
-            logger.warning("[user_maintenance][DELETE] password mismatch")
-            return _error(423, "password mismatech or weak password")
-
-        logger.info("[user_maintenance][DELETE] deleting user")
-        delete_result = collection.delete_one({"email": email})
-        if delete_result.deleted_count != 1:
-            logger.warning("[user_maintenance][DELETE] unexpected delete count")
-            return _error(422, "email doesnt exist")
-
-        logger.info("[user_maintenance][DELETE] user deleted successfully")
-        return _success(200, {"message": "user deleted successfully"})
-
-    except PyMongoError:
-        logger.exception("[user_maintenance][DELETE] MongoDB error")
-        raise
-    except Exception:
-        logger.exception("[user_maintenance][DELETE] unexpected error")
-        raise
-    finally:
-        if client is not None:
-            logger.info("[user_maintenance][DELETE] closing MongoDB connection")
-            client.close()
+    logger.info("[user_maintenance][DELETE] delete_user delegating to user_delete_service")
+    return delete_user_account(email=email, password=password)
 
