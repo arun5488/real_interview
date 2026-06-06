@@ -46,8 +46,33 @@ class InterviewerAgent:
         base = template.format(candidate_role=candidate_role or "the position")
         return (
             f"{base}\n\n"
-            "You may use tavily_web_search for factual or technical context when needed.\n"
+            "Prefer curated question-bank seeds when provided; personalize them to this candidate's resume. "
+            "Use tavily_web_search only when you need fresh technical facts or to probe deeper after a weak answer — "
+            "not to fetch generic interview question lists.\n"
             "Stay in character for your interviewer style."
+        )
+
+    def _question_bank_context(self, seeds: List[Dict[str, Any]], interviewer_type: str) -> str:
+        if not seeds:
+            return (
+                "\n\nNo curated question bank exists yet for this role and level. "
+                "Generate appropriate questions from the resume, job description, and HR summary."
+            )
+        lines = []
+        for i, item in enumerate(seeds, 1):
+            text = (item.get("text") or "").strip()
+            if not text:
+                continue
+            topic = (item.get("topic") or "").strip()
+            suffix = f" (topic: {topic})" if topic else ""
+            lines.append(f"{i}. {text}{suffix}")
+        if not lines:
+            return (
+                "\n\nNo unused question-bank seeds remain; continue based on the conversation and resume."
+            )
+        return (
+            "\n\nCurated question bank (prefer these; personalize; do not repeat questions already answered):\n"
+            + "\n".join(lines)
         )
 
     def _summary_context(self, interview_summary: str) -> str:
@@ -68,6 +93,7 @@ class InterviewerAgent:
         first_impression: Dict[str, Any],
         messages: List[BaseMessage],
         interview_summary: str = "",
+        question_bank_seeds: Optional[List[Dict[str, Any]]] = None,
     ) -> AIMessage:
         logger.info("[InterviewerAgent] run_turn type=%s", interviewer_type)
         llm = self._llm_wrapper.get_llm_model().bind_tools(self._tools)
@@ -81,6 +107,7 @@ class InterviewerAgent:
                 + "\n\nHR summary:\n"
                 + format_first_impression(first_impression)
                 + self._summary_context(interview_summary)
+                + self._question_bank_context(question_bank_seeds or [], interviewer_type)
             )
         )
         convo: List[BaseMessage] = [system] + list(messages)
@@ -120,11 +147,13 @@ class InterviewerAgent:
         parsed_data: Dict[str, Any],
         first_impression: Dict[str, Any],
         interview_summary: str = "",
+        question_bank_seeds: Optional[List[Dict[str, Any]]] = None,
     ) -> AIMessage:
         prompt = HumanMessage(
             content=(
                 "Start the interview. Introduce yourself briefly in character, "
-                "then ask your first question based on the resume and HR summary."
+                "then ask your first question. Prefer an unused question-bank seed if available; "
+                "otherwise base it on the resume and HR summary."
             )
         )
         return self.run_turn(
@@ -134,4 +163,5 @@ class InterviewerAgent:
             first_impression=first_impression,
             messages=[prompt],
             interview_summary=interview_summary,
+            question_bank_seeds=question_bank_seeds,
         )

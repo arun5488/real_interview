@@ -1,9 +1,10 @@
 from typing import Any, Dict
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 from pymongo.errors import PyMongoError
 
 from app.real_interview import logger
+from app.real_interview.backend.auth.jwt_auth import require_auth
 from app.real_interview.backend.services.pdfreader import resume_reader
 
 resume_blueprint = Blueprint("resume", __name__, url_prefix="/api")
@@ -18,26 +19,11 @@ def _public_resume_payload(result: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _userid_from_request() -> str | None:
-    userid = request.args.get("userid") or request.args.get("user_id")
-    if userid and isinstance(userid, str) and userid.strip():
-        return userid.strip()
-    if request.is_json:
-        body = request.get_json(silent=True)
-        if isinstance(body, dict):
-            uid = body.get("userid") or body.get("user_id")
-            if isinstance(uid, str) and uid.strip():
-                return uid.strip()
-    return None
-
-
 @resume_blueprint.route("/resumes", methods=["GET"])
+@require_auth
 def list_resumes_route():
     logger.info("[resume][GET /api/resumes] start")
-    userid = _userid_from_request()
-    if not userid:
-        logger.warning("[resume][GET /api/resumes] missing userid")
-        return jsonify({"error": "missing or invalid userid"}), 400
+    userid = g.current_user_id
 
     reader: resume_reader | None = None
     try:
@@ -60,11 +46,10 @@ def list_resumes_route():
 
 
 @resume_blueprint.route("/resumes/<resume_id>", methods=["GET"])
+@require_auth
 def get_resume_route(resume_id: str):
     logger.info("[resume][GET /api/resumes/%s] start", resume_id)
-    userid = _userid_from_request()
-    if not userid:
-        return jsonify({"error": "missing or invalid userid"}), 400
+    userid = g.current_user_id
 
     reader: resume_reader | None = None
     try:
@@ -88,13 +73,10 @@ def get_resume_route(resume_id: str):
 
 
 @resume_blueprint.route("/resumes", methods=["POST"])
+@require_auth
 def upload_resume_route():
     logger.info("[resume][POST /api/resumes] start")
-
-    userid = request.form.get("userid") or request.form.get("user_id")
-    if not userid or not isinstance(userid, str) or not userid.strip():
-        logger.warning("[resume][POST /api/resumes] missing or invalid userid")
-        return jsonify({"error": "missing or invalid userid"}), 400
+    userid = g.current_user_id
 
     file_storage = None
     for key in ("resume", "file", "pdf"):
@@ -122,7 +104,7 @@ def upload_resume_route():
             content_type=file_storage.content_type,
         )
         result = reader.save_resume(
-            userid.strip(),
+            userid,
             data,
             file_storage.filename,
             content_type=file_storage.content_type,

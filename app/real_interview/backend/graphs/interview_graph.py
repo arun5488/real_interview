@@ -1,8 +1,9 @@
 from functools import lru_cache
-from langgraph.checkpoint.memory import MemorySaver
+
 from langgraph.graph import END, START, StateGraph
 
 from app.real_interview import logger
+from app.real_interview.backend.graphs.checkpointer import get_shared_checkpointer
 from app.real_interview.backend.nodes.interview_nodes import (
     advance_interviewer_node,
     feedback_node,
@@ -16,9 +17,6 @@ from app.real_interview.backend.nodes.interview_nodes import (
     should_summarize,
 )
 from app.real_interview.backend.state.interview_pipeline_state import InterviewPipelineState
-
-_CHECKPOINTER = MemorySaver()
-
 
 def _build_start_graph():
     """HR + router + first interviewer opening."""
@@ -45,7 +43,7 @@ def _build_start_graph():
         {"continue": "interviewer_opening", "end": END},
     )
     graph.add_edge("interviewer_opening", END)
-    return graph.compile(checkpointer=_CHECKPOINTER)
+    return graph.compile(checkpointer=get_shared_checkpointer())
 
 
 def _build_chat_graph():
@@ -61,7 +59,7 @@ def _build_chat_graph():
         {"summarize": "summarize", "skip_summarize": END},
     )
     graph.add_edge("summarize", END)
-    return graph.compile(checkpointer=_CHECKPOINTER)
+    return graph.compile(checkpointer=get_shared_checkpointer())
 
 
 def _build_feedback_graph():
@@ -71,7 +69,7 @@ def _build_feedback_graph():
     graph.add_edge(START, "summarize")
     graph.add_edge("summarize", "feedback")
     graph.add_edge("feedback", END)
-    return graph.compile(checkpointer=_CHECKPOINTER)
+    return graph.compile(checkpointer=get_shared_checkpointer())
 
 
 def _build_advance_graph():
@@ -85,7 +83,7 @@ def _build_advance_graph():
         {"opening": "interviewer_opening", "done": END},
     )
     graph.add_edge("interviewer_opening", END)
-    return graph.compile(checkpointer=_CHECKPOINTER)
+    return graph.compile(checkpointer=get_shared_checkpointer())
 
 
 @lru_cache(maxsize=1)

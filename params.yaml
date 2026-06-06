@@ -9,3 +9,10 @@ interview:
   feedback:
     # When true, feedback agent prioritizes interview_summary over full transcript.
     use_summary_primary: true
+  question_bank:
+    # Questions injected into interviewer context per turn.
+    seeds_per_interviewer: 12
+    # Max stored questions per (job_role, experience_level) bucket.
+    max_questions_per_bucket: 200
+    # Max transcript chars sent to summarizer for question extraction.
+    extract_max_chars: 12000

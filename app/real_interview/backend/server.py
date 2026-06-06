@@ -5,7 +5,8 @@ from app.real_interview.backend.app_factory import create_app
 
 
 def main() -> None:
-    logger.info("[server] starting server")
+    """Local development server only. Use Gunicorn in production (see Procfile)."""
+    logger.info("[server] starting development server")
     app = create_app()
 
     port = int(os.getenv("PORT", "5000"))

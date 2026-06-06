@@ -7,6 +7,7 @@ import bcrypt
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from app.real_interview import logger
+from app.real_interview.backend.auth.email_utils import find_user_by_email, normalize_email
 from app.real_interview.backend.utils.mongodb import connect_mongodb
 
 
@@ -90,7 +91,8 @@ def sign_up_user(email: str, password: str, confirm_password: str) -> Dict[str, 
     client = None
 
     try:
-        if not isinstance(email, str) or not email.strip():
+        email = normalize_email(email)
+        if not email:
             logger.warning("[user_maintenance][POST] invalid email input")
             return _error(423, "password mismatch or weak password")
 
@@ -104,8 +106,8 @@ def sign_up_user(email: str, password: str, confirm_password: str) -> Dict[str, 
 
         client, collection = _get_client_and_collection()
 
-        logger.info(f"[user_maintenance][POST] checking if email exists: {email}")
-        if collection.find_one({"email": email}, {"_id": 1}):
+        logger.info("[user_maintenance][POST] checking if email exists: %s", email)
+        if find_user_by_email(collection, email):
             logger.warning("[user_maintenance][POST] email already exists")
             return _error(409, "email already exists")
 
@@ -130,7 +132,7 @@ def sign_up_user(email: str, password: str, confirm_password: str) -> Dict[str, 
         logger.info(f"[user_maintenance][POST] user created successfully: {user_id}")
         return _success(
             201,
-            {"user_id": user_id, "email": email.strip(), "message": "user created successfully"},
+            {"user_id": user_id, "email": email, "message": "user created successfully"},
         )
 
     except PyMongoError:
@@ -158,7 +160,8 @@ def login_user(email: str, password: str) -> Dict[str, Any]:
     client = None
 
     try:
-        if not isinstance(email, str) or not email.strip():
+        email = normalize_email(email)
+        if not email:
             logger.warning("[user_maintenance][POST] login invalid email")
             return _error(401, "invalid email or password")
 
@@ -168,7 +171,7 @@ def login_user(email: str, password: str) -> Dict[str, Any]:
 
         client, collection = _get_client_and_collection()
 
-        user_doc = collection.find_one({"email": email.strip()})
+        user_doc = find_user_by_email(collection, email)
         if not user_doc:
             logger.warning("[user_maintenance][POST] login user not found")
             return _error(401, "invalid email or password")
@@ -183,7 +186,7 @@ def login_user(email: str, password: str) -> Dict[str, Any]:
             return _error(401, "invalid email or password")
 
         user_id = str(user_doc["_id"])
-        user_email = user_doc.get("email") or email.strip()
+        user_email = user_doc.get("email") or email
         logger.info("[user_maintenance][POST] login success for user_id=%s", user_id)
         return _success(
             200,
@@ -204,16 +207,18 @@ def login_user(email: str, password: str) -> Dict[str, Any]:
 
 def change_password(
     email: str,
+    current_password: str,
     new_password: str,
     confirm_new_password: str,
 ) -> Dict[str, Any]:
     """
     PUT: Change Password
 
-    Input: email id, new password, confirm new password
+    Input: email, current password, new password, confirm new password
     Response: password changed successfully
 
     Error codes:
+      401 - current password incorrect
       422 - email does not exist
       423 - password mismatch or weak password
     """
@@ -221,9 +226,14 @@ def change_password(
     client = None
 
     try:
-        if not isinstance(email, str) or not email.strip():
+        email = normalize_email(email)
+        if not email:
             logger.warning("[user_maintenance][PUT] invalid email input")
             return _error(422, "email doesnot exist")
+
+        if not isinstance(current_password, str) or not current_password:
+            logger.warning("[user_maintenance][PUT] missing current password")
+            return _error(401, "current password is incorrect")
 
         if new_password != confirm_new_password:
             logger.warning("[user_maintenance][PUT] password mismatch")
@@ -235,11 +245,18 @@ def change_password(
 
         client, collection = _get_client_and_collection()
 
-        logger.info(f"[user_maintenance][PUT] checking if user exists: {email}")
-        user_doc = collection.find_one({"email": email})
+        logger.info("[user_maintenance][PUT] checking if user exists: %s", email)
+        user_doc = find_user_by_email(collection, email)
         if not user_doc:
             logger.warning("[user_maintenance][PUT] email does not exist")
             return _error(422, "email doesnot exist")
+
+        stored_hash = user_doc.get("password")
+        if not stored_hash or not isinstance(stored_hash, str):
+            return _error(401, "current password is incorrect")
+        if not _check_password(current_password, stored_hash):
+            logger.warning("[user_maintenance][PUT] current password mismatch")
+            return _error(401, "current password is incorrect")
 
         logger.info("[user_maintenance][PUT] updating password")
         hashed_password = _hash_password(new_password)

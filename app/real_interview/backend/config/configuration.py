@@ -14,6 +14,11 @@ _DEFAULT_INTERVIEW: Dict[str, Any] = {
         "input_max_chars": 16000,
     },
     "feedback": {"use_summary_primary": True},
+    "question_bank": {
+        "seeds_per_interviewer": 12,
+        "max_questions_per_bucket": 200,
+        "extract_max_chars": 12000,
+    },
 }
 
 
@@ -66,3 +71,7 @@ def get_summarizer_config() -> Dict[str, Any]:
 
 def get_feedback_config() -> Dict[str, Any]:
     return get_interview_config().get("feedback", _DEFAULT_INTERVIEW["feedback"])
+
+
+def get_question_bank_config() -> Dict[str, Any]:
+    return get_interview_config().get("question_bank", _DEFAULT_INTERVIEW["question_bank"])

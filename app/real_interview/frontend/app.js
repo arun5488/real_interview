@@ -42,6 +42,45 @@
     }
   }
 
+  function isSignedIn() {
+    return !!getStoredUserId();
+  }
+
+  function fetchCredentials() {
+    return "same-origin";
+  }
+
+  function authHeaders(extra) {
+    return extra || {};
+  }
+
+  function formatApiError(data, fallback) {
+    if (!data) return fallback;
+    if (data.error === "too many requests" && data.retry_after_seconds) {
+      return "Too many attempts. Try again in " + data.retry_after_seconds + " seconds.";
+    }
+    return data.error || data.message || fallback;
+  }
+
+  function handleUnauthorized() {
+    setStoredSession("", "");
+    clearStoredResume();
+    setStoredJobApplicationId("");
+    setStoredInterviewSession("");
+    showAuthView();
+  }
+
+  function restoreSessionFromServer() {
+    return apiGet("/api/users/me").then(function (r) {
+      if (r.ok && r.data.user_id) {
+        setStoredSession(r.data.user_id, r.data.email || "");
+        return true;
+      }
+      handleUnauthorized();
+      return false;
+    });
+  }
+
   function getStoredResumeId() {
     try {
       return sessionStorage.getItem(STORAGE_KEY_RESUME_ID) || "";
@@ -115,8 +154,12 @@
   }
 
   function apiGet(url) {
-    return fetch(url, { headers: { Accept: "application/json" } }).then(function (res) {
+    return fetch(url, {
+      credentials: fetchCredentials(),
+      headers: authHeaders({ Accept: "application/json" }),
+    }).then(function (res) {
       return res.json().then(function (data) {
+        if (res.status === 401) handleUnauthorized();
         return { ok: res.ok, status: res.status, data: data };
       });
     });
@@ -354,10 +397,12 @@
   function apiJson(url, body) {
     return fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      credentials: fetchCredentials(),
+      headers: authHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
       body: JSON.stringify(body),
     }).then(function (res) {
       return res.json().then(function (data) {
+        if (res.status === 401) handleUnauthorized();
         return { ok: res.ok, status: res.status, data: data };
       });
     });
@@ -366,10 +411,12 @@
   function apiPut(url, body) {
     return fetch(url, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      credentials: fetchCredentials(),
+      headers: authHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
       body: JSON.stringify(body),
     }).then(function (res) {
       return res.json().then(function (data) {
+        if (res.status === 401) handleUnauthorized();
         return { ok: res.ok, status: res.status, data: data };
       });
     });
@@ -378,10 +425,12 @@
   function apiDelete(url, body) {
     return fetch(url, {
       method: "DELETE",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      credentials: fetchCredentials(),
+      headers: authHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
       body: JSON.stringify(body),
     }).then(function (res) {
       return res.json().then(function (data) {
+        if (res.status === 401) handleUnauthorized();
         return { ok: res.ok, status: res.status, data: data };
       });
     });
@@ -454,8 +503,8 @@
       var msg = $("auth-message");
       clearMessage(msg);
 
-      if (!email) {
-        setMessage(msg, "Enter your account email.", "error");
+      if (!isSignedIn()) {
+        setMessage(msg, "Sign in first to delete your account.", "error");
         return;
       }
       if (!confirmed) {
@@ -466,7 +515,7 @@
       var btn = ev.target.querySelector('button[type="submit"]');
       btn.disabled = true;
 
-      apiDelete("/api/users", { email: email, password: password })
+      apiDelete("/api/users", { password: password })
         .then(function (r) {
           if (r.ok) {
             setStoredSession("", "");
@@ -501,8 +550,6 @@
         if (loginInput) loginEmail = loginInput.value.trim();
         showAuthPanel("reset");
         clearMessage($("auth-message"));
-        var resetEmail = document.querySelector('#form-reset-password input[name="email"]');
-        if (resetEmail && loginEmail) resetEmail.value = loginEmail;
       });
     }
 
@@ -518,14 +565,14 @@
     form.addEventListener("submit", function (ev) {
       ev.preventDefault();
       var fd = new FormData(ev.target);
-      var email = (fd.get("email") || "").toString().trim();
+      var current_password = (fd.get("current_password") || "").toString();
       var new_password = (fd.get("new_password") || "").toString();
       var confirm_new_password = (fd.get("confirm_new_password") || "").toString();
       var msg = $("auth-message");
       clearMessage(msg);
 
-      if (!email) {
-        setMessage(msg, "Enter your account email.", "error");
+      if (!isSignedIn()) {
+        setMessage(msg, "Sign in first to change your password.", "error");
         return;
       }
       if (new_password !== confirm_new_password) {
@@ -537,19 +584,18 @@
       btn.disabled = true;
 
       apiPut("/api/users/password", {
-        email: email,
+        current_password: current_password,
         new_password: new_password,
         confirm_new_password: confirm_new_password,
       })
         .then(function (r) {
           if (r.ok) {
-            setMessage(msg, r.data.message || "Password changed. You can log in now.", "ok");
+            handleUnauthorized();
+            setMessage(msg, (r.data.message || "Password changed.") + " Please log in again.", "ok");
             form.reset();
-            var loginInput = document.querySelector('#form-login input[name="email"]');
-            if (loginInput) loginInput.value = email;
             showAuthPanel("login");
           } else {
-            setMessage(msg, r.data.error || "Could not reset password.", "error");
+            setMessage(msg, formatApiError(r.data, "Could not change password."), "error");
           }
         })
         .catch(function () {
@@ -629,8 +675,7 @@
             setMessage(msg, r.data.message || "Account created.", "ok");
             showUploadView(displayEmail);
           } else {
-            var err = r.data.error || r.data.message || "Sign up failed.";
-            setMessage(msg, err, "error");
+            setMessage(msg, formatApiError(r.data, "Sign up failed."), "error");
           }
         })
         .catch(function () {
@@ -656,8 +701,7 @@
             setMessage(msg, r.data.message || "Signed in.", "ok");
             showUploadView(displayEmail);
           } else {
-            var err = r.data.error || "Log in failed.";
-            setMessage(msg, err, "error");
+            setMessage(msg, formatApiError(r.data, "Log in failed."), "error");
           }
         })
         .catch(function () {
@@ -669,13 +713,12 @@
   function wireUpload() {
     $("form-upload").addEventListener("submit", function (ev) {
       ev.preventDefault();
-      var userId = getStoredUserId();
       var msg = $("upload-message");
       clearMessage(msg);
 
-      if (!userId) {
+      if (!isSignedIn()) {
         setMessage(msg, "Session missing. Please sign in again.", "error");
-        showAuthView();
+        handleUnauthorized();
         return;
       }
 
@@ -686,19 +729,27 @@
       }
 
       var fd = new FormData();
-      fd.append("userid", userId);
       fd.append("resume", input.files[0], input.files[0].name);
 
       var btn = ev.target.querySelector('button[type="submit"]');
       btn.disabled = true;
 
-      fetch("/api/resumes", { method: "POST", body: fd })
+      fetch("/api/resumes", {
+        method: "POST",
+        credentials: fetchCredentials(),
+        headers: authHeaders(),
+        body: fd,
+      })
         .then(function (res) {
           return res.json().then(function (data) {
             return { ok: res.ok, status: res.status, data: data };
           });
         })
         .then(function (r) {
+          if (r.status === 401) {
+            handleUnauthorized();
+            return;
+          }
           if (r.ok) {
             var saved = r.data.resume;
             if (saved && saved._id) {
@@ -722,7 +773,6 @@
   function wireJobApplication() {
     $("form-job-application").addEventListener("submit", function (ev) {
       ev.preventDefault();
-      var customerId = getStoredUserId();
       var msg = $("job-message");
       var out = $("job-result");
       clearMessage(msg);
@@ -731,16 +781,15 @@
         out.textContent = "";
       }
 
-      if (!customerId) {
+      if (!isSignedIn()) {
         setMessage(msg, "Session missing. Please sign in again.", "error");
-        showAuthView();
+        handleUnauthorized();
         return;
       }
 
       var fd = new FormData(ev.target);
       var mode = getActiveJobInputMode();
       var body = {
-        customer_id: customerId,
         input_mode: mode,
       };
 
@@ -797,10 +846,8 @@
     });
   }
 
-  function loadResumeDetail(userId, resumeId, msgEl) {
-    return apiGet(
-      "/api/resumes/" + encodeURIComponent(resumeId) + "?userid=" + encodeURIComponent(userId)
-    ).then(function (r) {
+  function loadResumeDetail(resumeId, msgEl) {
+    return apiGet("/api/resumes/" + encodeURIComponent(resumeId)).then(function (r) {
       if (!r.ok || !r.data.resume) {
         setMessage(msgEl, r.data.error || "Could not load resume.", "error");
         return;
@@ -812,7 +859,7 @@
     });
   }
 
-  function renderResumeTable(resumes, userId, msgEl) {
+  function renderResumeTable(resumes, msgEl) {
     var wrap = $("resume-list-wrap");
     var tbody = $("resume-table-body");
     if (!tbody) return;
@@ -831,7 +878,7 @@
       link.className = "resume-link";
       link.textContent = item.label || "Resume";
       link.addEventListener("click", function () {
-        loadResumeDetail(userId, item.resume_id, msgEl);
+        loadResumeDetail(item.resume_id, msgEl);
       });
       tdResume.appendChild(link);
 
@@ -848,21 +895,20 @@
     if (!btn) return;
 
     btn.addEventListener("click", function () {
-      var userId = getStoredUserId();
       var msg = $("upload-message");
       clearMessage(msg);
       showElement($("resume-list-wrap"), false);
       showElement($("resume-selected-wrap"), false);
       showElement($("btn-continue-job"), false);
 
-      if (!userId) {
+      if (!isSignedIn()) {
         setMessage(msg, "Session missing. Please sign in again.", "error");
-        showAuthView();
+        handleUnauthorized();
         return;
       }
 
       btn.disabled = true;
-      apiGet("/api/resumes?userid=" + encodeURIComponent(userId))
+      apiGet("/api/resumes")
         .then(function (r) {
           if (!r.ok) {
             setMessage(msg, r.data.error || "Could not fetch resumes.", "error");
@@ -874,9 +920,9 @@
             return;
           }
           if (resumes.length === 1) {
-            return loadResumeDetail(userId, resumes[0].resume_id, msg);
+            return loadResumeDetail(resumes[0].resume_id, msg);
           }
-          renderResumeTable(resumes, userId, msg);
+          renderResumeTable(resumes, msg);
           setMessage(msg, "Select a resume from the list.", "ok");
         })
         .catch(function () {
@@ -902,19 +948,17 @@
   }
 
   function startInterviewSession() {
-    var customerId = getStoredUserId();
     var resumeId = getStoredResumeId();
     var jobAppId = getStoredJobApplicationId();
     var msg = $("job-message") || $("chat-message");
 
-    if (!customerId || !resumeId || !jobAppId) {
+    if (!isSignedIn() || !resumeId || !jobAppId) {
       setMessage(msg, "Resume and job application are required before starting the interview.", "error");
       return Promise.resolve();
     }
 
     setMessage(msg, "Starting interview…", "ok");
     return apiJson("/api/interview/start", {
-      customer_id: customerId,
       resume_id: resumeId,
       job_application_id: jobAppId,
     }).then(function (r) {
@@ -1082,7 +1126,7 @@
 
   function restoreInterviewChatIfNeeded() {
     var sessionId = getStoredInterviewSession();
-    if (!sessionId || !getStoredUserId()) return;
+    if (!sessionId || !isSignedIn()) return;
 
     apiGet("/api/interview/state?session_id=" + encodeURIComponent(sessionId)).then(function (r) {
       if (!r.ok) return;
@@ -1110,10 +1154,6 @@
 
   function wireSignOut() {
     function signOut() {
-      setStoredSession("", "");
-      clearStoredResume();
-      setStoredJobApplicationId("");
-      setStoredInterviewSession("");
       showElement($("resume-list-wrap"), false);
       showElement($("resume-selected-wrap"), false);
       showElement($("btn-continue-job"), false);
@@ -1126,7 +1166,9 @@
       if (textarea) textarea.value = "";
       var chatBox = $("chat-messages");
       if (chatBox) chatBox.textContent = "";
-      showAuthView();
+      apiJson("/api/users/logout", {}).finally(function () {
+        handleUnauthorized();
+      });
     }
     $("btn-sign-out").addEventListener("click", signOut);
     var jobBtn = $("btn-sign-out-job");
@@ -1150,16 +1192,17 @@
     wireInterviewChat();
     wireSignOut();
 
-    var uid = getStoredUserId();
-    if (uid) {
+    restoreSessionFromServer().then(function (ok) {
+      if (!ok) {
+        showAuthView();
+        return;
+      }
       if (getStoredInterviewSession()) {
         restoreInterviewChatIfNeeded();
       } else {
         showUploadView(getStoredUserEmail());
       }
-    } else {
-      showAuthView();
-    }
+    });
   }
 
   if (document.readyState === "loading") {

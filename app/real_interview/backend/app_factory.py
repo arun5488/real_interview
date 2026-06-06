@@ -3,6 +3,7 @@ from pathlib import Path
 from flask import Flask, send_from_directory
 
 from app.real_interview import logger
+from app.real_interview.backend.auth.jwt_auth import validate_jwt_config
 from app.real_interview.backend.routes import (
     interview_blueprint,
     job_application_blueprint,
@@ -15,6 +16,7 @@ _FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 def create_app() -> Flask:
     logger.info("[app_factory] creating Flask app")
+    validate_jwt_config()
     app = Flask(__name__)
 
     logger.info("[app_factory] registering user_maintenance blueprint")

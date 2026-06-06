@@ -1,0 +1,53 @@
+# Render Blueprint — deploy as a public web service.
+# Docs: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: real-interview
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -c gunicorn.conf.py app.real_interview.backend.wsgi:app
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DB_NAME
+        value: real_interview
+      - key: MONGODB_COLLECTION_USERS
+        value: authentications
+      - key: MONGODB_COLLECTION_RESUMES
+        value: resumes
+      - key: MONGODB_COLLECTION_JOB_APPLICATIONS
+        value: job_application
+      - key: MONGODB_COLLECTION_INTERVIEW
+        value: interview
+      - key: MONGODB_COLLECTION_QUESTION_BANK
+        value: interview_question_bank
+      - key: MONGODB_COLLECTION_RATE_LIMITS
+        value: rate_limits
+      - key: MONGODB_COLLECTION_REVOKED_TOKENS
+        value: revoked_tokens
+      - key: MONGODB_GRIDFS_RESUME_BUCKET
+        value: resume_pdf_fs
+      - key: MONGODB_CHECKPOINT_COLLECTION
+        value: checkpoints
+      - key: MONGODB_CHECKPOINT_WRITES_COLLECTION
+        value: checkpoint_writes
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: JWT_EXPIRE_HOURS
+        value: "24"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: WEB_CONCURRENCY
+        value: "2"
+      - key: GUNICORN_THREADS
+        value: "4"
+      - key: GUNICORN_TIMEOUT
+        value: "120"

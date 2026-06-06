@@ -27,6 +27,23 @@ class InterviewerTurnResult(BaseModel):
     conclusion: str = Field(default="")
 
 
+class BankQuestionItem(BaseModel):
+    """A single interview question stored in the question bank."""
+
+    text: str = Field(description="Interview question text")
+    topic: str = Field(default="", description="e.g. apis, system design, databases")
+    interviewer_style: str = Field(
+        default="",
+        description="positive, negative, objective, or empty for any style",
+    )
+
+
+class QuestionBankExtract(BaseModel):
+    """Summarizer output: new questions to append to the bank."""
+
+    questions: List[BankQuestionItem] = Field(default_factory=list)
+
+
 class CandidatePostInterviewFeedback(BaseModel):
     """Feedback agent output for the candidate."""
 

@@ -11,6 +11,13 @@ from app.real_interview.backend.agents.router_agent import RouterAgent
 from app.real_interview.backend.agents.summarizer_agent import SummarizerAgent
 from app.real_interview.backend.config.configuration import get_summarizer_config
 from app.real_interview.backend.services.interview_context_loader import load_interview_context
+from app.real_interview.backend.services.question_bank import (
+    append_questions_to_bank,
+    extract_question_from_message,
+    filter_seeds_for_interviewer,
+    hash_question_text,
+    load_question_seeds,
+)
 from app.real_interview.backend.state.interview_pipeline_state import InterviewPipelineState
 
 
@@ -37,6 +44,62 @@ def _prefix_interviewer_message(content: str, interviewer_index: int) -> str:
     return f"[{_interviewer_code(interviewer_index)}]: {text}"
 
 
+def _experience_level_from_state(state: InterviewPipelineState) -> str:
+    plan = state.get("panel_plan") or {}
+    return (plan.get("experience_level") or "junior").strip() or "junior"
+
+
+def _track_asked_question(content: str, asked_hashes: list[str]) -> list[str]:
+    """Append hash for the question in an interviewer message, if detectable."""
+    question = extract_question_from_message(content)
+    if not question:
+        return asked_hashes
+    qh = hash_question_text(question)
+    if qh in asked_hashes:
+        return asked_hashes
+    return [*asked_hashes, qh]
+
+
+def _seeds_for_interviewer(state: InterviewPipelineState, interviewer_type: str) -> list[dict[str, Any]]:
+    asked = set(state.get("asked_question_hashes") or [])
+    seeds = state.get("question_bank_seeds") or []
+    return filter_seeds_for_interviewer(seeds, asked, interviewer_type)
+
+
+def _update_question_bank_from_messages(
+    state: InterviewPipelineState,
+    new_messages: list,
+) -> dict[str, Any]:
+    """Extract new questions via summarizer and append to Mongo bank (never raises)."""
+    job_role = (state.get("job_role") or "").strip()
+    if not job_role or not new_messages:
+        return {}
+
+    experience_level = _experience_level_from_state(state)
+    agent = SummarizerAgent()
+    extracted = agent.extract_questions_for_bank(
+        new_messages=new_messages,
+        job_role=job_role,
+        experience_level=experience_level,
+    )
+    if not extracted:
+        return {}
+
+    added = append_questions_to_bank(job_role, experience_level, extracted, source="interview")
+    if added <= 0:
+        return {}
+
+    seeds = load_question_seeds(job_role, experience_level)
+    logger.info(
+        "[interview_nodes] question_bank updated added=%s seeds=%s role=%s level=%s",
+        added,
+        len(seeds),
+        job_role,
+        experience_level,
+    )
+    return {"question_bank_seeds": seeds}
+
+
 def load_context_node(state: InterviewPipelineState) -> Dict[str, Any]:
     logger.info("[interview_nodes] load_context customer_id=%s", state.get("customer_id"))
     try:
@@ -50,6 +113,8 @@ def load_context_node(state: InterviewPipelineState) -> Dict[str, Any]:
             "step": "loaded",
             "active_interviewer_index": 0,
             "interviewer_conclusions": [],
+            "question_bank_seeds": state.get("question_bank_seeds") or [],
+            "asked_question_hashes": state.get("asked_question_hashes") or [],
             "running_summary": state.get("running_summary") or "",
             "summary_snapshots": state.get("summary_snapshots") or [],
             "interview_complete": False,
@@ -80,8 +145,21 @@ def router_node(state: InterviewPipelineState) -> Dict[str, Any]:
         return {}
     agent = RouterAgent()
     plan = agent.build_panel_plan(state.get("first_impression") or {})
-    logger.info("[interview_nodes] router panel_size=%s", plan.get("panel_size"))
-    return {"panel_plan": plan, "step": "routed"}
+    job_role = state.get("job_role") or ""
+    experience_level = (plan.get("experience_level") or "junior").strip() or "junior"
+    seeds = load_question_seeds(job_role, experience_level)
+    logger.info(
+        "[interview_nodes] router panel_size=%s bank_seeds=%s level=%s",
+        plan.get("panel_size"),
+        len(seeds),
+        experience_level,
+    )
+    return {
+        "panel_plan": plan,
+        "question_bank_seeds": seeds,
+        "asked_question_hashes": state.get("asked_question_hashes") or [],
+        "step": "routed",
+    }
 
 
 def interviewer_opening_node(state: InterviewPipelineState) -> Dict[str, Any]:
@@ -99,17 +177,27 @@ def interviewer_opening_node(state: InterviewPipelineState) -> Dict[str, Any]:
     candidate_role = impression.get("candidate_role") or state.get("job_role") or ""
 
     agent = InterviewerAgent()
+    bank_seeds = _seeds_for_interviewer(state, interviewer_type)
     opening = agent.opening_message(
         interviewer_type=interviewer_type,
         candidate_role=candidate_role,
         parsed_data=state.get("parsed_data") or {},
         first_impression=impression,
         interview_summary=state.get("running_summary") or "",
+        question_bank_seeds=bank_seeds,
     )
     if isinstance(opening.content, str):
         opening.content = _prefix_interviewer_message(opening.content, idx)
 
-    return {"messages": [opening], "step": "interview_ready"}
+    asked = list(state.get("asked_question_hashes") or [])
+    if isinstance(opening.content, str):
+        asked = _track_asked_question(opening.content, asked)
+
+    return {
+        "messages": [opening],
+        "asked_question_hashes": asked,
+        "step": "interview_ready",
+    }
 
 
 def interviewer_turn_node(state: InterviewPipelineState) -> Dict[str, Any]:
@@ -128,6 +216,7 @@ def interviewer_turn_node(state: InterviewPipelineState) -> Dict[str, Any]:
     candidate_role = impression.get("candidate_role") or state.get("job_role") or ""
 
     agent = InterviewerAgent()
+    bank_seeds = _seeds_for_interviewer(state, interviewer_type)
     reply = agent.run_turn(
         interviewer_type=interviewer_type,
         candidate_role=candidate_role,
@@ -135,11 +224,20 @@ def interviewer_turn_node(state: InterviewPipelineState) -> Dict[str, Any]:
         first_impression=impression,
         messages=list(state.get("messages") or []),
         interview_summary=state.get("running_summary") or "",
+        question_bank_seeds=bank_seeds,
     )
     if isinstance(reply.content, str):
         reply.content = _prefix_interviewer_message(reply.content, idx)
 
-    return {"messages": [reply], "step": "interview_turn"}
+    asked = list(state.get("asked_question_hashes") or [])
+    if isinstance(reply.content, str):
+        asked = _track_asked_question(reply.content, asked)
+
+    return {
+        "messages": [reply],
+        "asked_question_hashes": asked,
+        "step": "interview_turn",
+    }
 
 
 def maybe_summarize_node(state: InterviewPipelineState) -> Dict[str, Any]:
@@ -164,8 +262,12 @@ def maybe_summarize_node(state: InterviewPipelineState) -> Dict[str, Any]:
     prior = state.get("running_summary") or ""
     agent = SummarizerAgent()
     segment = agent.summarize_increment(new_messages=new_messages, prior_summary=prior)
+    bank_update = _update_question_bank_from_messages(state, new_messages)
+
     if not segment.strip():
-        return {"last_summarized_message_count": len(messages)}
+        out: Dict[str, Any] = {"last_summarized_message_count": len(messages)}
+        out.update(bank_update)
+        return out
 
     from app.real_interview.backend.services.interview_record import append_summary_text
 
@@ -173,12 +275,14 @@ def maybe_summarize_node(state: InterviewPipelineState) -> Dict[str, Any]:
     snapshots = list(state.get("summary_snapshots") or [])
     snapshots.append(segment)
     logger.info("[interview_nodes] summary appended total_chars=%s", len(appended))
-    return {
+    out = {
         "running_summary": appended,
         "summary_snapshots": snapshots,
         "last_summarized_message_count": len(messages),
         "step": "summarized",
     }
+    out.update(bank_update)
+    return out
 
 
 def advance_interviewer_node(state: InterviewPipelineState) -> Dict[str, Any]:

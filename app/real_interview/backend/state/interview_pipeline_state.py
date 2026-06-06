@@ -24,6 +24,9 @@ class InterviewPipelineState(TypedDict, total=False):
     active_interviewer_index: int
     interviewer_conclusions: List[dict[str, Any]]
 
+    question_bank_seeds: List[dict[str, Any]]
+    asked_question_hashes: List[str]
+
     running_summary: str
     summary_snapshots: List[str]
     last_summarized_message_count: int

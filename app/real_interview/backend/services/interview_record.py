@@ -107,6 +107,19 @@ def create_interview_record(
             client.close()
 
 
+def list_session_ids_for_candidate(candidate_id: str) -> List[str]:
+    """Return interview session_ids owned by a candidate."""
+    client = None
+    try:
+        candidate_oid = _as_object_id(candidate_id, "candidate_id")
+        client, collection = _get_collection()
+        cursor = collection.find({"candidate_id": candidate_oid}, {"session_id": 1})
+        return [doc["session_id"] for doc in cursor if doc.get("session_id")]
+    finally:
+        if client is not None:
+            client.close()
+
+
 def get_interview_by_session(session_id: str) -> Optional[Dict[str, Any]]:
     logger.info("[interview_record] get_by_session session_id=%s", session_id)
     client = None

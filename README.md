@@ -56,6 +56,13 @@ params.yaml                     # Interview summarizer/feedback thresholds (proj
 - Python 3.10+
 - MongoDB running and reachable via `MONGODB_URI`
 - Valid `OPENAI_API_KEY` and `TAVILY_API_KEY` in `.env`
+- `JWT_SECRET_KEY` (32+ random characters) for production, or `ALLOW_INSECURE_JWT_DEV=true` for local dev only
+
+Generate a JWT secret:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
 
 ### Install dependencies
 
@@ -79,13 +86,73 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Start the server
+### Start the server (local development)
 
 From the project root with the virtual environment activated:
 
 ```bash
 python -m app.real_interview.backend.server
 ```
+
+### Start the server (production)
+
+Use Gunicorn (included in `requirements.txt`):
+
+```bash
+gunicorn -c gunicorn.conf.py app.real_interview.backend.wsgi:app
+```
+
+The `Procfile` uses the same command for Heroku-style hosts.
+
+---
+
+## Deploy as a public website
+
+The UI is static files served by Flask on the same origin, so no separate frontend deploy or CORS setup is required. LangGraph checkpoints and the question bank use your existing MongoDB cluster.
+
+### Environment variables (production)
+
+Copy from `.env_copy` and set these on your host (never commit real `.env`):
+
+| Variable | Required | Notes |
+|----------|----------|-------|
+| `MONGODB_URI` | Yes | Same Atlas cluster as local dev |
+| `OPENAI_API_KEY` | Yes | |
+| `TAVILY_API_KEY` | Yes | Interviewer web search |
+| `JWT_SECRET_KEY` | Yes | 32+ random chars; generate with `secrets.token_hex(32)` |
+| `COOKIE_SECURE` | Yes (HTTPS) | Set `true` on public HTTPS hosts |
+| `MONGODB_*` collections | Yes | See `.env_copy` for names |
+| `WEB_CONCURRENCY` | Recommended | `2` for starter plans |
+| `GUNICORN_TIMEOUT` | Recommended | `120` — LLM turns can be slow |
+
+Do **not** set `ALLOW_INSECURE_JWT_DEV` on a public host.
+
+### Render (recommended)
+
+1. Push the repo to GitHub.
+2. In [Render](https://render.com), **New → Blueprint** and point at `render.yaml`, or **New → Web Service** manually.
+3. Set secret env vars in the dashboard: `MONGODB_URI`, `OPENAI_API_KEY`, `TAVILY_API_KEY`, `JWT_SECRET_KEY`.
+4. Deploy. Render sets `PORT` automatically; `COOKIE_SECURE=true` is in the blueprint.
+5. Open the service URL — sign up and run a test interview.
+
+### Railway / Heroku / Docker
+
+- **Railway / Heroku:** use the `Procfile` start command; set the same env vars as above.
+- **Docker:** `docker build -t real-interview .` then run with `-p 5000:5000 --env-file .env` (use production values and `COOKIE_SECURE=true` over HTTPS).
+
+### MongoDB Atlas checklist
+
+- Allow network access from your host (or `0.0.0.0/0` for managed PaaS).
+- Reuse the same database; collections are created on first use (`interview_question_bank`, `checkpoints`, `rate_limits`, etc.).
+- GridFS bucket `resume_pdf_fs` stores uploaded PDFs.
+
+### Post-deploy smoke test
+
+1. Sign up / log in (cookie auth should persist).
+2. Upload a resume and save a job application.
+3. Start interview — confirm HR summary and `[I1]` opening message.
+4. Pause and resume — summary should carry over.
+5. End interview — feedback saved; sign out clears the session.
 
 ### Open the UI
 

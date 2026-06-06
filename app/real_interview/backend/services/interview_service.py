@@ -85,6 +85,56 @@ def _get_merged_state(thread_id: str) -> Dict[str, Any]:
     return {}
 
 
+def _restore_checkpoint_if_missing(session_id: str) -> None:
+    """
+    Rebuild LangGraph checkpoint from Mongo when checkpoints were cleared but
+    the interview record still exists (fallback after manual DB cleanup).
+    """
+    state = _get_merged_state(session_id)
+    if state.get("first_impression") and state.get("panel_plan"):
+        return
+
+    record = interview_db.get_interview_by_session(session_id)
+    if not record or not (record.get("messages") or []):
+        return
+
+    parts = session_id.split(":", 2)
+    if len(parts) != 3:
+        return
+    customer_id, resume_id, job_application_id = parts
+
+    try:
+        from app.real_interview.backend.nodes.interview_nodes import hr_recruiter_node, router_node
+        from app.real_interview.backend.services.interview_context_loader import load_interview_context
+
+        base: Dict[str, Any] = load_interview_context(
+            customer_id=customer_id,
+            resume_id=resume_id,
+            job_application_id=job_application_id,
+        )
+        base.update(
+            {
+                "session_id": session_id,
+                "interview_record_id": record.get("interview_id"),
+                "messages": _messages_from_record(record),
+                "running_summary": record.get("interview_summary") or "",
+                "last_summarized_message_count": int(record.get("last_summarized_message_count") or 0),
+                "active_interviewer_index": int(state.get("active_interviewer_index") or 0),
+                "interview_complete": bool(state.get("interview_complete")),
+                "interviewer_conclusions": state.get("interviewer_conclusions") or [],
+            }
+        )
+        base.update(hr_recruiter_node(base))
+        if base.get("error"):
+            logger.warning("[interview_service] restore HR failed session_id=%s", session_id)
+            return
+        base.update(router_node(base))
+        _patch_checkpoint(session_id, base)
+        logger.info("[interview_service] restored checkpoint from Mongo session_id=%s", session_id)
+    except Exception:
+        logger.exception("[interview_service] checkpoint restore failed session_id=%s", session_id)
+
+
 def _patch_checkpoint(session_id: str, values: Dict[str, Any]) -> None:
     if not values:
         return
@@ -117,12 +167,15 @@ def _force_summarize(session_id: str) -> str:
             "messages": _messages_from_record(record),
             "running_summary": record.get("interview_summary") or "",
             "last_summarized_message_count": int(record.get("last_summarized_message_count") or 0),
+            "job_role": record.get("role_applied_for") or "",
         }
     elif state and not (state.get("messages") or []) and record.get("messages"):
         state = dict(state)
         state["messages"] = _messages_from_record(record)
     if state:
         state = _merge_summary_from_record(state, record)
+        if not (state.get("job_role") or "").strip():
+            state["job_role"] = record.get("role_applied_for") or ""
     state["session_id"] = session_id
     state["force_summarize"] = True
     update = maybe_summarize_node(state)
@@ -225,6 +278,7 @@ def start_interview(
 
     existing = interview_db.get_interview_by_session(session_id)
     if existing:
+        _restore_checkpoint_if_missing(session_id)
         status = existing.get("interview_status") or "active"
         state = _get_merged_state(session_id)
         if state:
@@ -318,6 +372,8 @@ def send_interview_message(*, session_id: str, message: str, thread_id: str | No
         logger.warning("[interview_service] unknown session_id=%s", session_id)
         return {"status_code": 404, "error": "interview session not found", "session_id": session_id}
 
+    _restore_checkpoint_if_missing(session_id)
+
     blocked = _require_active_interview(record)
     if blocked:
         blocked["session_id"] = session_id
@@ -361,6 +417,7 @@ def advance_to_next_interviewer(*, session_id: str, thread_id: str | None = None
     record = interview_db.get_interview_by_session(session_id)
     if not record:
         return {"status_code": 404, "error": "interview session not found", "session_id": session_id}
+    _restore_checkpoint_if_missing(session_id)
     blocked = _require_active_interview(record)
     if blocked:
         blocked["session_id"] = session_id
@@ -394,6 +451,8 @@ def complete_interview(*, session_id: str, thread_id: str | None = None) -> Dict
     record = interview_db.get_interview_by_session(session_id)
     if not record:
         return {"status_code": 404, "error": "interview session not found", "session_id": session_id}
+
+    _restore_checkpoint_if_missing(session_id)
 
     if (record.get("interview_status") or "active") == "paused":
         return {
@@ -441,6 +500,8 @@ def pause_interview(*, session_id: str, thread_id: str | None = None) -> Dict[st
     record = interview_db.get_interview_by_session(session_id)
     if not record:
         return {"status_code": 404, "error": "interview session not found", "session_id": session_id}
+
+    _restore_checkpoint_if_missing(session_id)
 
     status = record.get("interview_status") or "active"
     if status == "paused":
@@ -491,6 +552,8 @@ def resume_interview(*, session_id: str, thread_id: str | None = None) -> Dict[s
     if not record:
         return {"status_code": 404, "error": "interview session not found", "session_id": session_id}
 
+    _restore_checkpoint_if_missing(session_id)
+
     status = record.get("interview_status") or "active"
     if status != "paused":
         return {
@@ -535,6 +598,8 @@ def get_interview_state(*, session_id: str, thread_id: str | None = None) -> Dic
         session_id = thread_id
     logger.info("[interview_service] get_state session_id=%s", session_id)
     record = interview_db.get_interview_by_session(session_id)
+    if record:
+        _restore_checkpoint_if_missing(session_id)
     state = _get_merged_state(session_id)
     if not record and not state:
         return {"status_code": 404, "error": "interview session not found", "session_id": session_id}
