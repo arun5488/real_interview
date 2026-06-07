@@ -22,6 +22,15 @@ def _collection_name() -> str:
     return os.getenv("MONGODB_COLLECTION_RATE_LIMITS", "rate_limits").strip()
 
 
+def _ensure_utc_aware(value: datetime | None) -> datetime | None:
+    """MongoDB returns naive UTC datetimes; normalize before comparing with aware `now`."""
+    if value is None or not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _check_rate_limit(key: str, max_attempts: int, window_seconds: int) -> tuple[bool, int]:
     client = connect_mongodb()
     try:
@@ -36,8 +45,8 @@ def _check_rate_limit(key: str, max_attempts: int, window_seconds: int) -> tuple
             )
             return True, 0
 
-        reset_at = doc.get("reset_at")
-        if not hasattr(reset_at, "timestamp") or reset_at < now:
+        reset_at = _ensure_utc_aware(doc.get("reset_at"))
+        if reset_at is None or reset_at < now:
             coll.replace_one(
                 {"_id": key},
                 {"_id": key, "count": 1, "reset_at": now + timedelta(seconds=window_seconds)},

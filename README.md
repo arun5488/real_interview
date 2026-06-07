@@ -144,9 +144,33 @@ Do **not** set `ALLOW_INSECURE_JWT_DEV` on a public host.
 
 ### MongoDB Atlas checklist
 
-- Allow network access from your host (or `0.0.0.0/0` for managed PaaS).
+- Allow network access from your host (see **Network access error** below).
 - Reuse the same database; collections are created on first use (`interview_question_bank`, `checkpoints`, `rate_limits`, etc.).
 - GridFS bucket `resume_pdf_fs` stores uploaded PDFs.
+
+### Network access error (Render / Atlas)
+
+If signup or login shows **Network error**, or Render logs show MongoDB timeout / `ServerSelectionTimeoutError` / **IP not whitelisted**, Atlas is blocking Render.
+
+**Fix (required for Render):**
+
+1. Open [MongoDB Atlas](https://cloud.mongodb.com) → your project → **Network Access** (left sidebar).
+2. Click **Add IP Address**.
+3. Choose **Allow Access from Anywhere** (`0.0.0.0/0`).  
+   Render free tier has no fixed IP, so you must allow all IPs (or the app cannot reach Atlas).
+4. Click **Confirm** and wait 1–2 minutes for the rule to apply.
+5. In Render → your service → **Logs**, confirm you see `MongoDB connection established` after redeploy or the next request.
+
+**Also verify on Render (Environment tab):**
+
+| Variable | Common mistake |
+|----------|----------------|
+| `MONGODB_URI` | Extra spaces, missing `mongodb+srv://`, wrong password |
+| `OPENAI_API_KEY` / `TAVILY_API_KEY` | Not set or copied with quotes |
+
+Copy `MONGODB_URI` from your local `.env` exactly (no leading/trailing spaces).
+
+**If the UI says "Network error" right after opening the site:** the free tier may still be waking up. Wait 60 seconds and refresh — the HTML loads before the API is ready on cold start.
 
 ### Post-deploy smoke test
 
