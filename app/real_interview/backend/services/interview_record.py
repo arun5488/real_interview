@@ -120,6 +120,52 @@ def list_session_ids_for_candidate(candidate_id: str) -> List[str]:
             client.close()
 
 
+def _serialize_session_summary(doc: Dict[str, Any]) -> Dict[str, Any]:
+    interview_date = doc.get("interview_date")
+    paused_at = doc.get("paused_at")
+    return {
+        "session_id": doc.get("session_id"),
+        "resume_id": doc.get("resume_id"),
+        "job_application_id": doc.get("job_application_id"),
+        "role_applied_for": doc.get("role_applied_for") or "",
+        "interview_status": doc.get("interview_status") or "active",
+        "interview_date": interview_date.isoformat() if hasattr(interview_date, "isoformat") else interview_date,
+        "paused_at": paused_at.isoformat() if hasattr(paused_at, "isoformat") else paused_at,
+    }
+
+
+def list_open_interviews_for_candidate(candidate_id: str) -> List[Dict[str, Any]]:
+    """Return paused or in-progress interviews (not completed), newest first."""
+    client = None
+    try:
+        candidate_oid = _as_object_id(candidate_id, "candidate_id")
+        client, collection = _get_collection()
+        query: Dict[str, Any] = {
+            "candidate_id": candidate_oid,
+            "interview_status": {"$in": ["paused", "active"]},
+            "$or": [
+                {"interview_feedback": None},
+                {"interview_feedback": {"$exists": False}},
+            ],
+        }
+        cursor = collection.find(
+            query,
+            {
+                "session_id": 1,
+                "resume_id": 1,
+                "job_application_id": 1,
+                "role_applied_for": 1,
+                "interview_status": 1,
+                "interview_date": 1,
+                "paused_at": 1,
+            },
+        ).sort("interview_date", -1)
+        return [_serialize_session_summary(doc) for doc in cursor if doc.get("session_id")]
+    finally:
+        if client is not None:
+            client.close()
+
+
 def get_interview_by_session(session_id: str) -> Optional[Dict[str, Any]]:
     logger.info("[interview_record] get_by_session session_id=%s", session_id)
     client = None

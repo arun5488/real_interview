@@ -123,6 +123,8 @@
     }
   }
 
+  var pendingResumableInterview = null;
+
   function setStoredInterviewSession(sessionId) {
     try {
       if (sessionId) sessionStorage.setItem(STORAGE_KEY_INTERVIEW_SESSION, sessionId);
@@ -657,6 +659,123 @@
     setJobInputMode(JOB_MODE_LINK);
   }
 
+  function storeInterviewContext(summary) {
+    if (!summary) return;
+    if (summary.session_id) setStoredInterviewSession(summary.session_id);
+    if (summary.job_application_id) setStoredJobApplicationId(summary.job_application_id);
+    if (summary.resume_id) {
+      try {
+        sessionStorage.setItem(STORAGE_KEY_RESUME_ID, summary.resume_id);
+      } catch (e) {
+        /* ignore */
+      }
+    }
+  }
+
+  function pickResumableInterview(interviews) {
+    if (!interviews || !interviews.length) return null;
+    for (var i = 0; i < interviews.length; i++) {
+      if (interviews[i].interview_status === "paused") return interviews[i];
+    }
+    return interviews[0];
+  }
+
+  function hidePausedInterviewBanners() {
+    pendingResumableInterview = null;
+    showElement($("paused-interview-banner-upload"), false);
+    showElement($("paused-interview-banner-job"), false);
+  }
+
+  function showPausedInterviewBanners(interviews, pick) {
+    if (!pick) {
+      hidePausedInterviewBanners();
+      return;
+    }
+    pendingResumableInterview = pick;
+    var statusText = pick.interview_status === "paused" ? "paused" : "in-progress";
+    var roleText = pick.role_applied_for || "your saved application";
+    ["upload", "job"].forEach(function (suffix) {
+      var banner = $("paused-interview-banner-" + suffix);
+      var statusEl = $("paused-interview-status-" + suffix);
+      var roleEl = $("paused-interview-role-" + suffix);
+      if (statusEl) statusEl.textContent = statusText;
+      if (roleEl) roleEl.textContent = roleText;
+      showElement(banner, true);
+    });
+  }
+
+  function restoreInterviewChatFromSessionId(sessionId) {
+    if (!sessionId || !isSignedIn()) return Promise.resolve(false);
+
+    return apiGet("/api/interview/state?session_id=" + encodeURIComponent(sessionId)).then(function (r) {
+      if (!r.ok) return false;
+      var state = r.data.state;
+      var record = r.data.record;
+      if (!state && record) {
+        state = {
+          session_id: sessionId,
+          messages: record.messages || [],
+          running_summary: record.interview_summary || "",
+          interview_status: record.interview_status || "active",
+          candidate_post_interview_feedback: record.interview_feedback,
+        };
+      }
+      if (!state && !record) return false;
+
+      setStoredInterviewSession(sessionId);
+      if (record) storeInterviewContext(record);
+      showInterviewChatView(getStoredUserEmail(), sessionId);
+      if (state) applyInterviewStateToUi(state);
+      else if (record && record.interview_status === "paused") {
+        setInterviewPausedUi(true);
+        setMessage($("chat-message"), "Interview paused. Click Resume to continue.", "ok");
+      }
+      return true;
+    });
+  }
+
+  function continuePendingInterview() {
+    if (!pendingResumableInterview || !pendingResumableInterview.session_id) return Promise.resolve(false);
+    storeInterviewContext(pendingResumableInterview);
+    return restoreInterviewChatFromSessionId(pendingResumableInterview.session_id);
+  }
+
+  function discoverResumableInterview() {
+    return apiGet("/api/interview/sessions").then(function (r) {
+      if (!r.ok || !r.data.interviews || !r.data.interviews.length) {
+        hidePausedInterviewBanners();
+        return false;
+      }
+      var pick = pickResumableInterview(r.data.interviews);
+      showPausedInterviewBanners(r.data.interviews, pick);
+      if (!pick || !pick.session_id) return false;
+      storeInterviewContext(pick);
+      return restoreInterviewChatFromSessionId(pick.session_id);
+    });
+  }
+
+  function afterAuthSuccess(email) {
+    return discoverResumableInterview().then(function (restored) {
+      if (restored) return;
+      if (getStoredInterviewSession()) {
+        return restoreInterviewChatFromSessionId(getStoredInterviewSession()).then(function (opened) {
+          if (!opened) showUploadView(email);
+        });
+      }
+      showUploadView(email);
+    });
+  }
+
+  function wireContinuePausedInterview() {
+    var btnUpload = $("btn-continue-paused-upload");
+    var btnJob = $("btn-continue-paused-job");
+    function onContinue() {
+      continuePendingInterview();
+    }
+    if (btnUpload) btnUpload.addEventListener("click", onContinue);
+    if (btnJob) btnJob.addEventListener("click", onContinue);
+  }
+
   function wireSignup() {
     $("form-signup").addEventListener("submit", function (ev) {
       ev.preventDefault();
@@ -673,7 +792,7 @@
             var displayEmail = r.data.email || email;
             setStoredSession(r.data.user_id, displayEmail);
             setMessage(msg, r.data.message || "Account created.", "ok");
-            showUploadView(displayEmail);
+            afterAuthSuccess(displayEmail);
           } else {
             setMessage(msg, formatApiError(r.data, "Sign up failed."), "error");
           }
@@ -699,7 +818,7 @@
             var displayEmail = r.data.email || email;
             setStoredSession(r.data.user_id, displayEmail);
             setMessage(msg, r.data.message || "Signed in.", "ok");
-            showUploadView(displayEmail);
+            afterAuthSuccess(displayEmail);
           } else {
             setMessage(msg, formatApiError(r.data, "Log in failed."), "error");
           }
@@ -1127,29 +1246,7 @@
   function restoreInterviewChatIfNeeded() {
     var sessionId = getStoredInterviewSession();
     if (!sessionId || !isSignedIn()) return;
-
-    apiGet("/api/interview/state?session_id=" + encodeURIComponent(sessionId)).then(function (r) {
-      if (!r.ok) return;
-      var state = r.data.state;
-      var record = r.data.record;
-      if (!state && record) {
-        state = {
-          session_id: sessionId,
-          messages: record.messages || [],
-          running_summary: record.interview_summary || "",
-          interview_status: record.interview_status || "active",
-          candidate_post_interview_feedback: record.interview_feedback,
-        };
-      }
-      if (state || record) {
-        showInterviewChatView(getStoredUserEmail(), sessionId);
-        if (state) applyInterviewStateToUi(state);
-        else if (record && record.interview_status === "paused") {
-          setInterviewPausedUi(true);
-          setMessage($("chat-message"), "Interview paused. Click Resume to continue.", "ok");
-        }
-      }
-    });
+    restoreInterviewChatFromSessionId(sessionId);
   }
 
   function wireSignOut() {
@@ -1166,6 +1263,7 @@
       if (textarea) textarea.value = "";
       var chatBox = $("chat-messages");
       if (chatBox) chatBox.textContent = "";
+      hidePausedInterviewBanners();
       apiJson("/api/users/logout", {}).finally(function () {
         handleUnauthorized();
       });
@@ -1190,6 +1288,7 @@
     wireJobApplication();
     wireStartInterview();
     wireInterviewChat();
+    wireContinuePausedInterview();
     wireSignOut();
 
     restoreSessionFromServer().then(function (ok) {
@@ -1197,11 +1296,7 @@
         showAuthView();
         return;
       }
-      if (getStoredInterviewSession()) {
-        restoreInterviewChatIfNeeded();
-      } else {
-        showUploadView(getStoredUserEmail());
-      }
+      afterAuthSuccess(getStoredUserEmail());
     });
   }
 

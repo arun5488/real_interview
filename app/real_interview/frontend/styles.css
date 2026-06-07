@@ -310,6 +310,18 @@ label.confirm-delete input {
   color: var(--ok);
 }
 
+.paused-interview-banner {
+  margin: 1rem 0;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--accent, #3b82f6);
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.paused-interview-banner p {
+  margin: 0 0 0.75rem;
+}
+
 .signed-in {
   display: flex;
   flex-wrap: wrap;

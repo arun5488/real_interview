@@ -9,6 +9,7 @@ from app.real_interview.backend.services.interview_service import (
     advance_to_next_interviewer,
     complete_interview,
     get_interview_state,
+    list_user_interview_sessions,
     pause_interview,
     resume_interview,
     send_interview_message,
@@ -188,6 +189,14 @@ def interview_complete_route():
         return err
 
     result = complete_interview(session_id=session_id)
+    return _response(result)
+
+
+@interview_blueprint.route("/interview/sessions", methods=["GET"])
+@require_auth
+def interview_sessions_route():
+    logger.info("[interview][GET /api/interview/sessions] user_id=%s", g.current_user_id)
+    result = list_user_interview_sessions(customer_id=g.current_user_id)
     return _response(result)
 
 

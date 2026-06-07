@@ -593,6 +593,21 @@ def resume_interview(*, session_id: str, thread_id: str | None = None) -> Dict[s
     }
 
 
+def list_user_interview_sessions(*, customer_id: str) -> Dict[str, Any]:
+    """List paused or in-progress interviews for the signed-in user."""
+    interviews = interview_db.list_open_interviews_for_candidate(customer_id)
+    logger.info(
+        "[interview_service] list_sessions customer_id=%s count=%s",
+        customer_id,
+        len(interviews),
+    )
+    return {
+        "status_code": 200,
+        "interviews": interviews,
+        "count": len(interviews),
+    }
+
+
 def get_interview_state(*, session_id: str, thread_id: str | None = None) -> Dict[str, Any]:
     if thread_id and not session_id:
         session_id = thread_id

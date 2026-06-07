@@ -124,6 +124,15 @@
           Signed in as <code id="display-user-email"></code>
           <button type="button" id="btn-sign-out" class="btn link">Sign out</button>
         </p>
+        <div id="paused-interview-banner-upload" class="paused-interview-banner is-hidden" hidden role="status">
+          <p>
+            You have a <strong id="paused-interview-status-upload">paused</strong> interview for
+            <strong id="paused-interview-role-upload">this role</strong>.
+          </p>
+          <button type="button" id="btn-continue-paused-upload" class="btn primary">
+            Continue interview
+          </button>
+        </div>
         <div class="upload-actions">
           <button type="button" id="btn-fetch-resume" class="btn secondary">Fetch resume</button>
         </div>
@@ -162,6 +171,15 @@
           Signed in as <code id="display-user-email-job"></code>
           <button type="button" id="btn-sign-out-job" class="btn link">Sign out</button>
         </p>
+        <div id="paused-interview-banner-job" class="paused-interview-banner is-hidden" hidden role="status">
+          <p>
+            You have a <strong id="paused-interview-status-job">paused</strong> interview for
+            <strong id="paused-interview-role-job">this role</strong>.
+          </p>
+          <button type="button" id="btn-continue-paused-job" class="btn primary">
+            Continue interview
+          </button>
+        </div>
         <p class="hint">
           Provide a job posting link or paste the job description. We will extract the role and store an
           agent-readable summary.
