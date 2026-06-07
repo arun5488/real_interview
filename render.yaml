@@ -1,10 +1,10 @@
-# Render Blueprint — deploy as a public web service.
+# Render Blueprint — free-tier web service (sleeps after ~15 min idle; wakes on next visit).
 # Docs: https://render.com/docs/blueprint-spec
 services:
   - type: web
     name: real-interview
     runtime: python
-    plan: starter
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn -c gunicorn.conf.py app.real_interview.backend.wsgi:app
     healthCheckPath: /
@@ -40,14 +40,14 @@ services:
       - key: TAVILY_API_KEY
         sync: false
       - key: JWT_SECRET_KEY
-        sync: false
+        generateValue: true
       - key: JWT_EXPIRE_HOURS
         value: "24"
       - key: COOKIE_SECURE
         value: "true"
       - key: WEB_CONCURRENCY
-        value: "2"
+        value: "1"
       - key: GUNICORN_THREADS
-        value: "4"
+        value: "2"
       - key: GUNICORN_TIMEOUT
         value: "120"

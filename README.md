@@ -119,21 +119,23 @@ Copy from `.env_copy` and set these on your host (never commit real `.env`):
 | `MONGODB_URI` | Yes | Same Atlas cluster as local dev |
 | `OPENAI_API_KEY` | Yes | |
 | `TAVILY_API_KEY` | Yes | Interviewer web search |
-| `JWT_SECRET_KEY` | Yes | 32+ random chars; generate with `secrets.token_hex(32)` |
+| `JWT_SECRET_KEY` | Yes | Local: generate with `secrets.token_hex(32)`. Render: auto-generated via `generateValue: true` in `render.yaml` |
 | `COOKIE_SECURE` | Yes (HTTPS) | Set `true` on public HTTPS hosts |
 | `MONGODB_*` collections | Yes | See `.env_copy` for names |
-| `WEB_CONCURRENCY` | Recommended | `2` for starter plans |
+| `WEB_CONCURRENCY` | Recommended | `1` on Render free (512 MB); `2` on paid plans |
 | `GUNICORN_TIMEOUT` | Recommended | `120` — LLM turns can be slow |
 
 Do **not** set `ALLOW_INSECURE_JWT_DEV` on a public host.
 
-### Render (recommended)
+### Render (free tier)
 
 1. Push the repo to GitHub.
-2. In [Render](https://render.com), **New → Blueprint** and point at `render.yaml`, or **New → Web Service** manually.
-3. Set secret env vars in the dashboard: `MONGODB_URI`, `OPENAI_API_KEY`, `TAVILY_API_KEY`, `JWT_SECRET_KEY`.
-4. Deploy. Render sets `PORT` automatically; `COOKIE_SECURE=true` is in the blueprint.
-5. Open the service URL — sign up and run a test interview.
+2. In [Render](https://render.com), **New → Blueprint** and point at `render.yaml`.
+3. When prompted, enter only: `MONGODB_URI`, `OPENAI_API_KEY`, `TAVILY_API_KEY`.
+4. Deploy. Render auto-generates `JWT_SECRET_KEY` (random 256-bit secret, stored in the dashboard — not in git).
+5. Open the service URL — the first visit after idle may take ~30–60s while the app wakes up.
+
+**Free tier notes:** service sleeps after ~15 minutes with no traffic; any visit wakes it. You get 750 instance-hours/month. For always-on hosting, change `plan: free` to `plan: starter` in `render.yaml`.
 
 ### Railway / Heroku / Docker
 
