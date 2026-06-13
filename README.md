@@ -134,7 +134,10 @@ Copy from `.env_copy` and set these on your host (never commit real `.env`):
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` | Yes (feedback) | Outbound mail (e.g. Gmail + [app password](https://support.google.com/accounts/answer/185833)) |
 | `SMTP_USE_TLS` | Optional | Default `true` (port `587`) |
 | `SEND_INTERVIEW_FEEDBACK_EMAIL` | Optional | Default `true` — email post-interview feedback when the candidate opts in |
-| `FEEDBACK_FROM_EMAIL` | Optional | Sender address; defaults to `SMTP_USER` |
+| `EMAIL_PROVIDER` | Optional | `smtp` (local) or `resend` (required on Render free — SMTP ports blocked) |
+| `RESEND_API_KEY` | Yes (resend) | From [resend.com](https://resend.com) — used when `EMAIL_PROVIDER=resend` |
+| `RESEND_FROM_EMAIL` | Yes (resend) | Verified sender, e.g. `Real Interview <onboarding@resend.dev>` for testing |
+| `FEEDBACK_FROM_EMAIL` | Optional | Sender address; defaults to `SMTP_USER` or `RESEND_FROM_EMAIL` |
 | `FEEDBACK_FROM_NAME` | Optional | Display name in the From header (default `Real Interview`) |
 | `COOKIE_SECURE` | Yes (HTTPS) | Set `true` on public HTTPS hosts |
 | `MONGODB_*` collections | Yes | See `.env_copy` for names |
@@ -152,6 +155,8 @@ Do **not** set `ALLOW_INSECURE_JWT_DEV` on a public host.
 5. Open [https://real-interview-lpd6.onrender.com/](https://real-interview-lpd6.onrender.com/) — the first visit after idle may take ~30–60s while the app wakes up.
 
 **Free tier notes:** service sleeps after ~15 minutes with no traffic; any visit wakes it. You get 750 instance-hours/month. For always-on hosting, change `plan: free` to `plan: starter` in `render.yaml`.
+
+**Email on free tier:** Render [blocks outbound SMTP](https://render.com/changelog/free-web-services-will-no-longer-allow-outbound-traffic-to-smtp-ports) on ports 25, 465, and 587 — Gmail SMTP will fail with `Network is unreachable`. Use **`EMAIL_PROVIDER=resend`** with a [Resend](https://resend.com) API key (HTTPS), or upgrade to a paid Render instance to use SMTP.
 
 ### Railway / Heroku / Docker
 

@@ -57,6 +57,13 @@ services:
         value: "true"
       - key: SEND_INTERVIEW_FEEDBACK_EMAIL
         value: "true"
+      # Render free tier blocks SMTP ports 587/465 — use Resend (HTTPS) in production:
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
       - key: JWT_EXPIRE_HOURS
         value: "24"
       - key: COOKIE_SECURE

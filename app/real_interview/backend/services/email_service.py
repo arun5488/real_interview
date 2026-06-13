@@ -1,9 +1,17 @@
+import json
 import os
 import smtplib
+import urllib.error
+import urllib.request
 from email.message import EmailMessage
 from typing import Any, Dict, Optional, Tuple
 
 from app.real_interview import logger
+
+
+def email_provider() -> str:
+    """smtp (local/dev) or resend (HTTPS — works on Render free tier)."""
+    return os.getenv("EMAIL_PROVIDER", "smtp").strip().lower()
 
 
 def _smtp_settings() -> Tuple[str, int, str, str, bool, str, str] | None:
@@ -24,7 +32,18 @@ def _smtp_settings() -> Tuple[str, int, str, str, bool, str, str] | None:
     return host, port, user, password, use_tls, from_email, from_name
 
 
+def _resend_settings() -> Tuple[str, str, str] | None:
+    api_key = os.getenv("RESEND_API_KEY", "").strip()
+    from_email = os.getenv("RESEND_FROM_EMAIL", "").strip() or os.getenv("FEEDBACK_FROM_EMAIL", "").strip()
+    from_name = os.getenv("FEEDBACK_FROM_NAME", "Real Interview").strip()
+    if not api_key or not from_email:
+        return None
+    return api_key, from_email, from_name
+
+
 def is_smtp_available() -> bool:
+    if email_provider() == "resend":
+        return _resend_settings() is not None
     return _smtp_settings() is not None
 
 
@@ -49,7 +68,13 @@ def is_smtp_configured() -> bool:
     return is_smtp_available() and bool(feedback_recipient())
 
 
-def _send_email(*, to_email: str, subject: str, body: str) -> tuple[bool, str]:
+def _send_via_smtp(
+    *,
+    to_email: str,
+    subject: str,
+    body: str,
+    reply_to: str = "",
+) -> tuple[bool, str]:
     settings = _smtp_settings()
     if not settings:
         logger.error("[email_service] SMTP not configured")
@@ -60,6 +85,8 @@ def _send_email(*, to_email: str, subject: str, body: str) -> tuple[bool, str]:
     msg["Subject"] = subject
     msg["From"] = f"{from_name} <{from_email}>"
     msg["To"] = to_email
+    if reply_to:
+        msg["Reply-To"] = reply_to
     msg.set_content(body)
 
     try:
@@ -74,7 +101,62 @@ def _send_email(*, to_email: str, subject: str, body: str) -> tuple[bool, str]:
         return False, "failed to send email"
     except OSError:
         logger.exception("[email_service] network error connecting to SMTP")
+        return False, (
+            "failed to connect to mail server (Render free tier blocks SMTP ports 587/465 — "
+            "set EMAIL_PROVIDER=resend or upgrade Render)"
+        )
+
+
+def _send_via_resend(
+    *,
+    to_email: str,
+    subject: str,
+    body: str,
+    reply_to: str = "",
+) -> tuple[bool, str]:
+    settings = _resend_settings()
+    if not settings:
+        logger.error("[email_service] Resend not configured")
+        return False, "email delivery is not configured"
+
+    api_key, from_email, from_name = settings
+    payload: Dict[str, Any] = {
+        "from": f"{from_name} <{from_email}>",
+        "to": [to_email],
+        "subject": subject,
+        "text": body,
+    }
+    if reply_to:
+        payload["reply_to"] = reply_to
+
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=data,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            if 200 <= response.status < 300:
+                return True, ""
+        return False, "failed to send email"
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        logger.error("[email_service] Resend HTTP %s: %s", exc.code, detail)
+        return False, "failed to send email"
+    except urllib.error.URLError:
+        logger.exception("[email_service] Resend network error")
         return False, "failed to connect to mail server"
+
+
+def _send_email(*, to_email: str, subject: str, body: str, reply_to: str = "") -> tuple[bool, str]:
+    if email_provider() == "resend":
+        return _send_via_resend(to_email=to_email, subject=subject, body=body, reply_to=reply_to)
+    return _send_via_smtp(to_email=to_email, subject=subject, body=body, reply_to=reply_to)
 
 
 def _format_interview_feedback_body(
@@ -176,11 +258,11 @@ def send_feedback_email(
     client_ip: str = "",
 ) -> tuple[bool, str]:
     """
-    Send website feedback to the configured admin mailbox via SMTP.
+    Send website feedback to the configured admin mailbox.
     Returns (success, error_message).
     """
     if not is_smtp_configured():
-        logger.error("[email_service] SMTP not configured")
+        logger.error("[email_service] email not configured")
         return False, "email delivery is not configured"
 
     to_email = feedback_recipient()
@@ -200,7 +282,12 @@ def send_feedback_email(
         lines.append(f"IP: {client_ip}")
     lines.extend(["", "Message:", message.strip(), ""])
 
-    ok, err = _send_email(to_email=to_email, subject=subject, body="\n".join(lines))
+    ok, err = _send_email(
+        to_email=to_email,
+        subject=subject,
+        body="\n".join(lines),
+        reply_to=contact_email.strip() if contact_email else "",
+    )
     if ok:
         logger.info("[email_service] feedback email sent category=%s", category)
     return ok, err
