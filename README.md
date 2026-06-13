@@ -133,7 +133,7 @@ Copy from `.env_copy` and set these on your host (never commit real `.env`):
 | `FEEDBACK_TO_EMAIL` | Yes (feedback) | Inbox for `/feedback` submissions; defaults to first `ADMIN_EMAILS` if unset |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` | Yes (feedback) | Outbound mail (e.g. Gmail + [app password](https://support.google.com/accounts/answer/185833)) |
 | `SMTP_USE_TLS` | Optional | Default `true` (port `587`) |
-| `SEND_INTERVIEW_FEEDBACK_EMAIL` | Optional | Default `true` — email post-interview feedback when the candidate opts in |
+| `SEND_INTERVIEW_FEEDBACK_EMAIL` | Optional | Default `false` — email post-interview feedback to candidates (disabled in production) |
 | `EMAIL_PROVIDER` | Optional | `smtp` (local) or `resend` (required on Render free — SMTP ports blocked) |
 | `RESEND_API_KEY` | Yes (resend) | From [resend.com](https://resend.com) — used when `EMAIL_PROVIDER=resend` |
 | `RESEND_FROM_EMAIL` | Yes (resend) | Verified sender, e.g. `Real Interview <onboarding@resend.dev>` for testing |
@@ -150,13 +150,13 @@ Do **not** set `ALLOW_INSECURE_JWT_DEV` on a public host.
 
 1. Push the repo to GitHub.
 2. In [Render](https://render.com), **New → Blueprint** and point at `render.yaml`.
-3. When prompted, enter `MONGODB_URI`, `OPENAI_API_KEY`, `TAVILY_API_KEY`, `ADMIN_EMAILS`, and SMTP vars for feedback email (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, `FEEDBACK_TO_EMAIL`).
+3. When prompted, enter `MONGODB_URI`, `OPENAI_API_KEY`, `TAVILY_API_KEY`, `ADMIN_EMAILS`, and email vars (`EMAIL_PROVIDER=resend`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `FEEDBACK_TO_EMAIL`).
 4. Deploy. Render auto-generates `JWT_SECRET_KEY` (random 256-bit secret, stored in the dashboard — not in git).
 5. Open [https://real-interview-lpd6.onrender.com/](https://real-interview-lpd6.onrender.com/) — the first visit after idle may take ~30–60s while the app wakes up.
 
 **Free tier notes:** service sleeps after ~15 minutes with no traffic; any visit wakes it. You get 750 instance-hours/month. For always-on hosting, change `plan: free` to `plan: starter` in `render.yaml`.
 
-**Email on free tier:** Render [blocks outbound SMTP](https://render.com/changelog/free-web-services-will-no-longer-allow-outbound-traffic-to-smtp-ports) on ports 25, 465, and 587 — Gmail SMTP will fail with `Network is unreachable`. Use **`EMAIL_PROVIDER=resend`** with a [Resend](https://resend.com) API key (HTTPS), or upgrade to a paid Render instance to use SMTP.
+**Email on free tier:** Render [blocks outbound SMTP](https://render.com/changelog/free-web-services-will-no-longer-allow-outbound-traffic-to-smtp-ports) on ports 25, 465, and 587 — Gmail SMTP will fail with `Network is unreachable`. Use **`EMAIL_PROVIDER=resend`** with a [Resend](https://resend.com) API key (HTTPS), or upgrade to a paid Render instance to use SMTP. With Resend’s test sender (`onboarding@resend.dev`), set **`FEEDBACK_TO_EMAIL`** to the same address you used to sign up at Resend — website feedback from `/feedback` will deliver there. Post-interview feedback to candidates is disabled (on-screen only).
 
 ### Railway / Heroku / Docker
 
@@ -362,7 +362,7 @@ All panelists are in the room from the start. After each answer, a **panel coord
 
 If you reply that you have **no questions** when invited, the interview ends immediately and post-interview feedback is generated. You can still click **End interview** early at any time.
 
-**Email feedback:** On the interview chat screen, check **Email feedback to my account address**. When the session ends (manually or automatically), structured feedback is emailed to your signup address if SMTP is configured and `SEND_INTERVIEW_FEEDBACK_EMAIL=true`.
+Post-interview feedback is shown on screen when the session ends; it is not emailed to candidates.
 
 ```
 [I1]: Hi Alex, I'm on the engineering panel. I've reviewed your background on the payments service —

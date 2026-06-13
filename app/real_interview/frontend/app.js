@@ -267,11 +267,6 @@
       );
     }
     renderChatMessages(state.messages || [], state.panel_plan);
-    var emailOpt = $("opt-email-feedback");
-    var emailOptWrap = emailOpt ? emailOpt.closest(".email-feedback-opt") : null;
-    if (emailOpt) {
-      emailOpt.checked = !!state.email_feedback_opt_in;
-    }
     var feedback = state.candidate_post_interview_feedback;
     var wrap = $("interview-feedback-wrap");
     var fbEl = $("interview-feedback");
@@ -282,13 +277,8 @@
       showElement($("btn-end-interview"), false);
       showElement($("btn-pause-interview"), false);
       showElement($("btn-resume-interview"), false);
-      if (emailOptWrap) showElement(emailOptWrap, false);
       setInterviewPausedUi(false);
-      if (state.feedback_email_sent) {
-        setMessage($("chat-message"), "Feedback was emailed to your account address.", "ok");
-      }
     } else {
-      if (emailOptWrap) showElement(emailOptWrap, true);
       var paused = state.interview_status === "paused";
       setInterviewPausedUi(paused);
       var chatMsg = $("chat-message");
@@ -743,8 +733,6 @@
           running_summary: record.interview_summary || "",
           interview_status: record.interview_status || "active",
           candidate_post_interview_feedback: record.interview_feedback,
-          email_feedback_opt_in: !!record.email_feedback_opt_in,
-          feedback_email_sent: !!record.feedback_email_sent,
         };
       }
       if (!state && !record) return false;
@@ -1178,9 +1166,7 @@
           return;
         }
         btnEnd.disabled = true;
-        var emailOpt = $("opt-email-feedback");
-        var emailFeedback = emailOpt ? emailOpt.checked : false;
-        apiJson("/api/interview/complete", { session_id: sessionId, email_feedback: emailFeedback })
+        apiJson("/api/interview/complete", { session_id: sessionId })
           .then(function (r) {
             if (r.ok) {
               applyInterviewStateToUi(r.data.state);
@@ -1192,20 +1178,6 @@
           .finally(function () {
             btnEnd.disabled = false;
           });
-      });
-    }
-
-    var emailOpt = $("opt-email-feedback");
-    if (emailOpt) {
-      emailOpt.addEventListener("change", function () {
-        var sessionId = getStoredInterviewSession();
-        if (!sessionId) return;
-        apiPut("/api/interview/preferences", {
-          session_id: sessionId,
-          email_feedback_opt_in: emailOpt.checked,
-        }).catch(function () {
-          /* non-blocking */
-        });
       });
     }
 
