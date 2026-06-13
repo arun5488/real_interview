@@ -136,7 +136,7 @@ Copy from `.env_copy` and set these on your host (never commit real `.env`):
 | `SEND_INTERVIEW_FEEDBACK_EMAIL` | Optional | Default `false` — email post-interview feedback to candidates (disabled in production) |
 | `EMAIL_PROVIDER` | Optional | `smtp` (local) or `resend` (required on Render free — SMTP ports blocked) |
 | `RESEND_API_KEY` | Yes (resend) | From [resend.com](https://resend.com) — used when `EMAIL_PROVIDER=resend` |
-| `RESEND_FROM_EMAIL` | Yes (resend) | Verified sender, e.g. `Real Interview <onboarding@resend.dev>` for testing |
+| `RESEND_FROM_EMAIL` | Yes (resend) | e.g. `onboarding@resend.dev` (test sender; must match Resend account setup) |
 | `FEEDBACK_FROM_EMAIL` | Optional | Sender address; defaults to `SMTP_USER` or `RESEND_FROM_EMAIL` |
 | `FEEDBACK_FROM_NAME` | Optional | Display name in the From header (default `Real Interview`) |
 | `COOKIE_SECURE` | Yes (HTTPS) | Set `true` on public HTTPS hosts |

@@ -41,6 +41,35 @@ def _resend_settings() -> Tuple[str, str, str] | None:
     return api_key, from_email, from_name
 
 
+def _format_from_address(from_name: str, from_email: str) -> str:
+    """Accept plain email or already-formatted 'Name <email@domain>'."""
+    raw = from_email.strip()
+    if "<" in raw and ">" in raw:
+        return raw
+    return f"{from_name} <{raw}>"
+
+
+def _parse_resend_error(detail: str, status: int) -> str:
+    if "error code: 1010" in detail.lower():
+        return (
+            "Resend API blocked by Cloudflare (missing browser headers) — "
+            "update to latest app code or retry after deploy"
+        )
+    try:
+        payload = json.loads(detail)
+        message = (payload.get("message") or payload.get("error") or "").strip()
+        if message:
+            return message
+    except json.JSONDecodeError:
+        pass
+    if status == 403:
+        return (
+            "Resend rejected the send (403) — with onboarding@resend.dev, "
+            "FEEDBACK_TO_EMAIL must match your Resend signup address"
+        )
+    return "failed to send email"
+
+
 def is_smtp_available() -> bool:
     if email_provider() == "resend":
         return _resend_settings() is not None
@@ -121,7 +150,7 @@ def _send_via_resend(
 
     api_key, from_email, from_name = settings
     payload: Dict[str, Any] = {
-        "from": f"{from_name} <{from_email}>",
+        "from": _format_from_address(from_name, from_email),
         "to": [to_email],
         "subject": subject,
         "text": body,
@@ -136,6 +165,8 @@ def _send_via_resend(
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "RealInterview/1.0 (Resend API)",
         },
         method="POST",
     )
@@ -147,7 +178,7 @@ def _send_via_resend(
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:500]
         logger.error("[email_service] Resend HTTP %s: %s", exc.code, detail)
-        return False, "failed to send email"
+        return False, _parse_resend_error(detail, exc.code)
     except urllib.error.URLError:
         logger.exception("[email_service] Resend network error")
         return False, "failed to connect to mail server"
