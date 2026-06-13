@@ -1,6 +1,8 @@
 import re
 from typing import Any, Dict, Optional
 
+from bson import ObjectId
+from bson.errors import InvalidId
 from pymongo.collection import Collection
 
 from app.real_interview import logger
@@ -11,6 +13,18 @@ def normalize_email(email: str) -> str:
     if not isinstance(email, str):
         return ""
     return email.strip().lower()
+
+
+def find_user_by_id(collection: Collection, user_id: str) -> Optional[Dict[str, Any]]:
+    """Find auth user document by MongoDB _id string."""
+    raw = (user_id or "").strip()
+    if not raw:
+        return None
+    try:
+        oid = ObjectId(raw)
+    except InvalidId:
+        return None
+    return collection.find_one({"_id": oid})
 
 
 def find_user_by_email(collection: Collection, email: str) -> Optional[Dict[str, Any]]:

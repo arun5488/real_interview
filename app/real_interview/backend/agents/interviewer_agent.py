@@ -84,6 +84,25 @@ class InterviewerAgent:
             + summary
         )
 
+    def _panel_context(self, panel_plan: Dict[str, Any], interviewer_index: int) -> str:
+        selected = panel_plan.get("selected_interviewers") or []
+        if not selected:
+            return ""
+        roster = []
+        for i, style in enumerate(selected):
+            label = f"I{i + 1} ({style})"
+            if i == interviewer_index:
+                label += " — you"
+            roster.append(label)
+        return (
+            "\n\nLive panel interview — all interviewers are in the room and hear every answer.\n"
+            "Panel present: "
+            + ", ".join(roster)
+            + ".\n"
+            "Ask concise follow-up questions grounded in what the candidate just said. "
+            "Do not repeat questions another panelist already asked in this turn."
+        )
+
     def run_turn(
         self,
         *,
@@ -94,20 +113,42 @@ class InterviewerAgent:
         messages: List[BaseMessage],
         interview_summary: str = "",
         question_bank_seeds: Optional[List[Dict[str, Any]]] = None,
+        panel_plan: Optional[Dict[str, Any]] = None,
+        interviewer_index: int = 0,
+        turn_mode: str = "technical",
     ) -> AIMessage:
-        logger.info("[InterviewerAgent] run_turn type=%s", interviewer_type)
+        logger.info(
+            "[InterviewerAgent] run_turn type=%s index=%s mode=%s",
+            interviewer_type,
+            interviewer_index,
+            turn_mode,
+        )
         llm = self._llm_wrapper.get_llm_model().bind_tools(self._tools)
         max_tool_rounds = int(os.getenv("INTERVIEWER_MAX_TOOL_ROUNDS", "3").strip() or "3")
+
+        panel_block = ""
+        if panel_plan:
+            panel_block = self._panel_context(panel_plan, interviewer_index)
+        if turn_mode == "candidate_qa":
+            panel_block += (
+                "\n\nThe candidate is asking questions for the panel. Answer briefly and professionally "
+                "about the role, team, or process. Do not ask a new technical interview question."
+            )
 
         system = SystemMessage(
             content=(
                 self._system_prompt(interviewer_type, candidate_role)
+                + panel_block
                 + "\n\nResume:\n"
                 + format_parsed_resume(parsed_data)
                 + "\n\nHR summary:\n"
                 + format_first_impression(first_impression)
                 + self._summary_context(interview_summary)
-                + self._question_bank_context(question_bank_seeds or [], interviewer_type)
+                + (
+                    self._question_bank_context(question_bank_seeds or [], interviewer_type)
+                    if turn_mode != "candidate_qa"
+                    else ""
+                )
             )
         )
         convo: List[BaseMessage] = [system] + list(messages)
@@ -148,20 +189,33 @@ class InterviewerAgent:
         first_impression: Dict[str, Any],
         interview_summary: str = "",
         question_bank_seeds: Optional[List[Dict[str, Any]]] = None,
+        panel_plan: Optional[Dict[str, Any]] = None,
+        interviewer_index: int = 0,
+        is_lead: bool = True,
+        prior_messages: Optional[List[BaseMessage]] = None,
     ) -> AIMessage:
-        prompt = HumanMessage(
-            content=(
-                "Start the interview. Introduce yourself briefly in character, "
-                "then ask your first question. Prefer an unused question-bank seed if available; "
-                "otherwise base it on the resume and HR summary."
+        if is_lead:
+            prompt_text = (
+                "Start the live panel interview. Welcome the candidate, note that the full panel is present, "
+                "introduce yourself briefly in character, then ask your first question. "
+                "Prefer an unused question-bank seed if available; otherwise base it on the resume and HR summary."
             )
-        )
+        else:
+            prompt_text = (
+                "You are joining an ongoing panel opening. Another panelist already welcomed the candidate. "
+                "Briefly introduce yourself in character and ask one complementary opening question "
+                "that fits your interviewer style. Do not repeat the other panelist's question."
+            )
+        prompt = HumanMessage(content=prompt_text)
+        convo = list(prior_messages or []) + [prompt]
         return self.run_turn(
             interviewer_type=interviewer_type,
             candidate_role=candidate_role,
             parsed_data=parsed_data,
             first_impression=first_impression,
-            messages=[prompt],
+            messages=convo,
             interview_summary=interview_summary,
             question_bank_seeds=question_bank_seeds,
+            panel_plan=panel_plan,
+            interviewer_index=interviewer_index,
         )

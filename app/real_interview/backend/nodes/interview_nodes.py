@@ -1,16 +1,28 @@
 import re
 from typing import Any, Dict
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from app.real_interview import logger
 from app.real_interview.backend.agents.feedback_agent import FeedbackAgent
 from app.real_interview.backend.agents.hr_recruiter_agent import HrRecruiterAgent
 from app.real_interview.backend.agents.interviewer_agent import InterviewerAgent
+from app.real_interview.backend.agents.panel_coordinator_agent import PanelCoordinatorAgent
 from app.real_interview.backend.agents.router_agent import RouterAgent
 from app.real_interview.backend.agents.summarizer_agent import SummarizerAgent
 from app.real_interview.backend.config.configuration import get_summarizer_config
-from app.real_interview.backend.services.interview_context_loader import load_interview_context
+from app.real_interview.backend.services.interview_closing import (
+    all_panelists_at_question_limit,
+    ask_candidate_questions_message,
+    candidate_asked_question,
+    candidate_declined_questions,
+    counts_for_state,
+    counts_from_state,
+    increment_interviewer_question_count,
+    max_candidate_qa_turns,
+    max_questions_per_interviewer,
+    panel_closing_message,
+)
 from app.real_interview.backend.services.question_bank import (
     append_questions_to_bank,
     extract_question_from_message,
@@ -18,6 +30,7 @@ from app.real_interview.backend.services.question_bank import (
     hash_question_text,
     load_question_seeds,
 )
+from app.real_interview.backend.services.interview_context_loader import load_interview_context
 from app.real_interview.backend.state.interview_pipeline_state import InterviewPipelineState
 
 
@@ -58,6 +71,24 @@ def _track_asked_question(content: str, asked_hashes: list[str]) -> list[str]:
     if qh in asked_hashes:
         return asked_hashes
     return [*asked_hashes, qh]
+
+
+def _message_counts_as_question(content: str) -> bool:
+    text = (content or "").strip()
+    if not text:
+        return False
+    if extract_question_from_message(text):
+        return True
+    return "?" in text
+
+
+def _last_human_text(messages: list) -> str:
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            content = getattr(msg, "content", "")
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+    return ""
 
 
 def _seeds_for_interviewer(state: InterviewPipelineState, interviewer_type: str) -> list[dict[str, Any]]:
@@ -118,6 +149,10 @@ def load_context_node(state: InterviewPipelineState) -> Dict[str, Any]:
             "running_summary": state.get("running_summary") or "",
             "summary_snapshots": state.get("summary_snapshots") or [],
             "interview_complete": False,
+            "interview_phase": "active",
+            "interviewer_question_counts": state.get("interviewer_question_counts") or {},
+            "candidate_qa_turns": int(state.get("candidate_qa_turns") or 0),
+            "pending_auto_complete": False,
         }
     except Exception as exc:
         logger.exception("[interview_nodes] load_context failed")
@@ -162,61 +197,113 @@ def router_node(state: InterviewPipelineState) -> Dict[str, Any]:
     }
 
 
-def interviewer_opening_node(state: InterviewPipelineState) -> Dict[str, Any]:
-    logger.info("[interview_nodes] interviewer_opening")
-    if state.get("error"):
-        return {}
+def _run_panel_speakers(
+    state: InterviewPipelineState,
+    speaker_indices: list[int],
+    *,
+    opening: bool,
+    question_counts: dict[int, int] | None = None,
+) -> Dict[str, Any]:
     plan = state.get("panel_plan") or {}
     selected = plan.get("selected_interviewers") or []
-    idx = int(state.get("active_interviewer_index") or 0)
-    if idx >= len(selected):
-        return {"step": "interview_ready", "interview_complete": False}
+    panel_size = len(selected)
+    if not selected:
+        return {"step": "interview_ready"}
 
-    interviewer_type = selected[idx]
+    counts = dict(question_counts or counts_from_state(state.get("interviewer_question_counts"), panel_size))
     impression = state.get("first_impression") or {}
     candidate_role = impression.get("candidate_role") or state.get("job_role") or ""
-
     agent = InterviewerAgent()
-    bank_seeds = _seeds_for_interviewer(state, interviewer_type)
-    opening = agent.opening_message(
-        interviewer_type=interviewer_type,
-        candidate_role=candidate_role,
-        parsed_data=state.get("parsed_data") or {},
-        first_impression=impression,
-        interview_summary=state.get("running_summary") or "",
-        question_bank_seeds=bank_seeds,
-    )
-    if isinstance(opening.content, str):
-        opening.content = _prefix_interviewer_message(opening.content, idx)
-
+    base_messages = list(state.get("messages") or [])
+    turn_messages: list = []
     asked = list(state.get("asked_question_hashes") or [])
-    if isinstance(opening.content, str):
-        asked = _track_asked_question(opening.content, asked)
+    out_messages: list[AIMessage] = []
+
+    for order, idx in enumerate(speaker_indices):
+        if idx >= len(selected):
+            continue
+        if not opening and counts.get(idx, 0) >= max_questions_per_interviewer():
+            continue
+        interviewer_type = selected[idx]
+        local_state: InterviewPipelineState = {**state, "asked_question_hashes": asked}
+        bank_seeds = _seeds_for_interviewer(local_state, interviewer_type)
+        if opening:
+            reply = agent.opening_message(
+                interviewer_type=interviewer_type,
+                candidate_role=candidate_role,
+                parsed_data=state.get("parsed_data") or {},
+                first_impression=impression,
+                interview_summary=state.get("running_summary") or "",
+                question_bank_seeds=bank_seeds,
+                panel_plan=plan,
+                interviewer_index=idx,
+                is_lead=(order == 0),
+                prior_messages=base_messages + turn_messages,
+            )
+        else:
+            reply = agent.run_turn(
+                interviewer_type=interviewer_type,
+                candidate_role=candidate_role,
+                parsed_data=state.get("parsed_data") or {},
+                first_impression=impression,
+                messages=base_messages + turn_messages,
+                interview_summary=state.get("running_summary") or "",
+                question_bank_seeds=bank_seeds,
+                panel_plan=plan,
+                interviewer_index=idx,
+            )
+
+        if isinstance(reply.content, str):
+            reply.content = _prefix_interviewer_message(reply.content, idx)
+            if _message_counts_as_question(reply.content):
+                counts = increment_interviewer_question_count(counts, panel_size, idx)
+            asked = _track_asked_question(reply.content, asked)
+        turn_messages.append(reply)
+        out_messages.append(reply)
 
     return {
-        "messages": [opening],
+        "messages": out_messages,
         "asked_question_hashes": asked,
-        "step": "interview_ready",
+        "interviewer_question_counts": counts_for_state(counts),
+        "step": "interview_ready" if opening else "interview_turn",
     }
 
 
-def interviewer_turn_node(state: InterviewPipelineState) -> Dict[str, Any]:
-    logger.info("[interview_nodes] interviewer_turn")
-    if state.get("error") or state.get("interview_complete"):
-        return {}
+def _begin_awaiting_candidate_questions(state: InterviewPipelineState, counts: dict[int, int]) -> Dict[str, Any]:
+    speaker_idx = 0
+    return {
+        "messages": [AIMessage(content=ask_candidate_questions_message(speaker_idx))],
+        "interview_phase": "awaiting_candidate_questions",
+        "interviewer_question_counts": counts_for_state(counts),
+        "step": "awaiting_candidate_questions",
+    }
 
+
+def _finish_interview(state: InterviewPipelineState, counts: dict[int, int]) -> Dict[str, Any]:
+    return {
+        "messages": [AIMessage(content=panel_closing_message(0))],
+        "interview_phase": "ended",
+        "pending_auto_complete": True,
+        "interview_complete": True,
+        "interviewer_question_counts": counts_for_state(counts),
+        "step": "interview_closing",
+    }
+
+
+def _run_candidate_qa_turn(
+    state: InterviewPipelineState,
+    counts: dict[int, int],
+) -> Dict[str, Any]:
     plan = state.get("panel_plan") or {}
     selected = plan.get("selected_interviewers") or []
-    idx = int(state.get("active_interviewer_index") or 0)
-    if idx >= len(selected):
-        return {"step": "awaiting_feedback"}
+    if not selected:
+        return _finish_interview(state, counts)
 
+    idx = 0
     interviewer_type = selected[idx]
     impression = state.get("first_impression") or {}
     candidate_role = impression.get("candidate_role") or state.get("job_role") or ""
-
     agent = InterviewerAgent()
-    bank_seeds = _seeds_for_interviewer(state, interviewer_type)
     reply = agent.run_turn(
         interviewer_type=interviewer_type,
         candidate_role=candidate_role,
@@ -224,20 +311,114 @@ def interviewer_turn_node(state: InterviewPipelineState) -> Dict[str, Any]:
         first_impression=impression,
         messages=list(state.get("messages") or []),
         interview_summary=state.get("running_summary") or "",
-        question_bank_seeds=bank_seeds,
+        panel_plan=plan,
+        interviewer_index=idx,
+        turn_mode="candidate_qa",
     )
     if isinstance(reply.content, str):
         reply.content = _prefix_interviewer_message(reply.content, idx)
 
-    asked = list(state.get("asked_question_hashes") or [])
-    if isinstance(reply.content, str):
-        asked = _track_asked_question(reply.content, asked)
-
-    return {
-        "messages": [reply],
-        "asked_question_hashes": asked,
-        "step": "interview_turn",
+    qa_turns = int(state.get("candidate_qa_turns") or 0) + 1
+    out_messages = [reply]
+    result: Dict[str, Any] = {
+        "messages": out_messages,
+        "interview_phase": "candidate_qa",
+        "candidate_qa_turns": qa_turns,
+        "interviewer_question_counts": counts_for_state(counts),
+        "step": "candidate_qa",
     }
+    if qa_turns >= max_candidate_qa_turns():
+        out_messages.append(AIMessage(content=panel_closing_message(idx)))
+        result["interview_phase"] = "ended"
+        result["pending_auto_complete"] = True
+        result["interview_complete"] = True
+        result["step"] = "interview_closing"
+    return result
+
+
+def panel_opening_node(state: InterviewPipelineState) -> Dict[str, Any]:
+    logger.info("[interview_nodes] panel_opening")
+    if state.get("error"):
+        return {}
+    plan = state.get("panel_plan") or {}
+    selected = plan.get("selected_interviewers") or []
+    if not selected:
+        return {"step": "interview_ready", "interview_complete": False}
+
+    coordinator = PanelCoordinatorAgent()
+    speaker_indices = coordinator.plan_opening(plan)
+    result = _run_panel_speakers(state, speaker_indices, opening=True)
+    result["interview_complete"] = False
+    result["interview_phase"] = "active"
+    result["candidate_qa_turns"] = 0
+    result["pending_auto_complete"] = False
+    return result
+
+
+def panel_turn_node(state: InterviewPipelineState) -> Dict[str, Any]:
+    logger.info("[interview_nodes] panel_turn phase=%s", state.get("interview_phase") or "active")
+    if state.get("error"):
+        return {}
+
+    plan = state.get("panel_plan") or {}
+    selected = plan.get("selected_interviewers") or []
+    panel_size = len(selected)
+    if not panel_size:
+        return {"step": "interview_turn"}
+
+    counts = counts_from_state(state.get("interviewer_question_counts"), panel_size)
+    phase = state.get("interview_phase") or "active"
+    last_human = _last_human_text(list(state.get("messages") or []))
+
+    if phase == "awaiting_candidate_questions":
+        if candidate_declined_questions(last_human):
+            logger.info("[interview_nodes] candidate declined panel questions; ending")
+            return _finish_interview(state, counts)
+        if candidate_asked_question(last_human) or last_human.strip():
+            return _run_candidate_qa_turn(state, counts)
+        return _finish_interview(state, counts)
+
+    if phase == "candidate_qa":
+        if candidate_declined_questions(last_human):
+            return _finish_interview(state, counts)
+        qa_turns = int(state.get("candidate_qa_turns") or 0)
+        if qa_turns >= max_candidate_qa_turns():
+            return _finish_interview(state, counts)
+        return _run_candidate_qa_turn(state, counts)
+
+    if all_panelists_at_question_limit(counts, panel_size):
+        logger.info("[interview_nodes] all panelists reached question limit; inviting candidate questions")
+        return _begin_awaiting_candidate_questions(state, counts)
+
+    coordinator = PanelCoordinatorAgent()
+    speaker_indices = coordinator.plan_follow_up(
+        panel_plan=plan,
+        messages=list(state.get("messages") or []),
+        running_summary=state.get("running_summary") or "",
+    )
+    limit = max_questions_per_interviewer()
+    speaker_indices = [idx for idx in speaker_indices if counts.get(idx, 0) < limit]
+
+    if not speaker_indices:
+        if all_panelists_at_question_limit(counts, panel_size):
+            return _begin_awaiting_candidate_questions(state, counts)
+        speaker_indices = [
+            idx for idx, count in counts.items() if count < limit
+        ][:1]
+
+    result = _run_panel_speakers(state, speaker_indices, opening=False, question_counts=counts)
+    result["interview_phase"] = "active"
+    return result
+
+
+def interviewer_opening_node(state: InterviewPipelineState) -> Dict[str, Any]:
+    """Backward-compatible alias for panel opening."""
+    return panel_opening_node(state)
+
+
+def interviewer_turn_node(state: InterviewPipelineState) -> Dict[str, Any]:
+    """Backward-compatible alias for panel turn."""
+    return panel_turn_node(state)
 
 
 def maybe_summarize_node(state: InterviewPipelineState) -> Dict[str, Any]:

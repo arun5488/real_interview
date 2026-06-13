@@ -5,11 +5,13 @@ from typing import Any, Dict, List, Optional
 from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo.collection import Collection
-from pymongo.errors import CollectionInvalid, PyMongoError
+from pymongo.errors import CollectionInvalid
 
 from app.real_interview import logger
 from app.real_interview.backend.config.configuration import get_summarizer_config
-from app.real_interview.backend.utils.mongodb import connect_mongodb
+from app.real_interview.backend.utils.mongodb import get_mongodb_database
+
+_interview_collection_ready = False
 
 
 def _get_db_name() -> str:
@@ -29,21 +31,26 @@ def _as_object_id(value: str, field_name: str) -> ObjectId:
         raise ValueError(f"{field_name} is not a valid ObjectId") from exc
 
 
-def _get_collection() -> tuple[Any, Collection]:
-    client = connect_mongodb()
-    db = client[_get_db_name()]
+def _get_collection() -> Collection:
+    global _interview_collection_ready
+    db = get_mongodb_database(_get_db_name())
     coll_name = _get_interview_collection_name()
-    names = set(db.list_collection_names())
-    if coll_name not in names:
-        try:
-            db.create_collection(coll_name)
-            logger.info("[interview_record] created collection %r", coll_name)
-        except CollectionInvalid:
-            logger.warning("[interview_record] collection %r already exists (race)", coll_name)
-    collection = db[coll_name]
-    collection.create_index([("session_id", 1)], unique=True, name="unique_session_id")
-    collection.create_index([("candidate_id", 1), ("interview_date", -1)], name="candidate_interview_date")
-    return client, collection
+    if not _interview_collection_ready:
+        names = set(db.list_collection_names())
+        if coll_name not in names:
+            try:
+                db.create_collection(coll_name)
+                logger.info("[interview_record] created collection %r", coll_name)
+            except CollectionInvalid:
+                logger.warning("[interview_record] collection %r already exists (race)", coll_name)
+        collection = db[coll_name]
+        collection.create_index([("session_id", 1)], unique=True, name="unique_session_id")
+        collection.create_index(
+            [("candidate_id", 1), ("interview_date", -1)],
+            name="candidate_interview_date",
+        )
+        _interview_collection_ready = True
+    return db[coll_name]
 
 
 def append_summary_text(existing: str, new_part: str) -> str:
@@ -76,48 +83,40 @@ def create_interview_record(
     role_applied_for: str,
 ) -> Dict[str, Any]:
     logger.info("[interview_record] create session_id=%s candidate_id=%s", session_id, candidate_id)
-    client = None
-    try:
-        candidate_oid = _as_object_id(candidate_id, "candidate_id")
-        client, collection = _get_collection()
-        interview_date = datetime.now(timezone.utc)
-        doc = {
-            "session_id": session_id,
-            "candidate_id": candidate_oid,
-            "resume_id": resume_id,
-            "job_application_id": job_application_id,
-            "interview_date": interview_date,
-            "role_applied_for": role_applied_for or "",
-            "interview_status": "active",
-            "paused_at": None,
-            "interview_summary": "",
-            "interview_feedback": None,
-            "messages": [],
-            "last_summarized_message_count": 0,
-        }
-        result = collection.insert_one(doc)
-        logger.info("[interview_record] created interview_id=%s", result.inserted_id)
-        return {
-            "interview_id": str(result.inserted_id),
-            "session_id": session_id,
-            "interview_date": interview_date.isoformat(),
-        }
-    finally:
-        if client is not None:
-            client.close()
+    candidate_oid = _as_object_id(candidate_id, "candidate_id")
+    collection = _get_collection()
+    interview_date = datetime.now(timezone.utc)
+    doc = {
+        "session_id": session_id,
+        "candidate_id": candidate_oid,
+        "resume_id": resume_id,
+        "job_application_id": job_application_id,
+        "interview_date": interview_date,
+        "role_applied_for": role_applied_for or "",
+        "interview_status": "active",
+        "paused_at": None,
+        "interview_summary": "",
+        "interview_feedback": None,
+        "email_feedback_opt_in": False,
+        "feedback_email_sent": False,
+        "messages": [],
+        "last_summarized_message_count": 0,
+    }
+    result = collection.insert_one(doc)
+    logger.info("[interview_record] created interview_id=%s", result.inserted_id)
+    return {
+        "interview_id": str(result.inserted_id),
+        "session_id": session_id,
+        "interview_date": interview_date.isoformat(),
+    }
 
 
 def list_session_ids_for_candidate(candidate_id: str) -> List[str]:
     """Return interview session_ids owned by a candidate."""
-    client = None
-    try:
-        candidate_oid = _as_object_id(candidate_id, "candidate_id")
-        client, collection = _get_collection()
-        cursor = collection.find({"candidate_id": candidate_oid}, {"session_id": 1})
-        return [doc["session_id"] for doc in cursor if doc.get("session_id")]
-    finally:
-        if client is not None:
-            client.close()
+    candidate_oid = _as_object_id(candidate_id, "candidate_id")
+    collection = _get_collection()
+    cursor = collection.find({"candidate_id": candidate_oid}, {"session_id": 1})
+    return [doc["session_id"] for doc in cursor if doc.get("session_id")]
 
 
 def _serialize_session_summary(doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -136,121 +135,91 @@ def _serialize_session_summary(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 def list_open_interviews_for_candidate(candidate_id: str) -> List[Dict[str, Any]]:
     """Return paused or in-progress interviews (not completed), newest first."""
-    client = None
-    try:
-        candidate_oid = _as_object_id(candidate_id, "candidate_id")
-        client, collection = _get_collection()
-        query: Dict[str, Any] = {
-            "candidate_id": candidate_oid,
-            "interview_status": {"$in": ["paused", "active"]},
-            "$or": [
-                {"interview_feedback": None},
-                {"interview_feedback": {"$exists": False}},
-            ],
-        }
-        cursor = collection.find(
-            query,
-            {
-                "session_id": 1,
-                "resume_id": 1,
-                "job_application_id": 1,
-                "role_applied_for": 1,
-                "interview_status": 1,
-                "interview_date": 1,
-                "paused_at": 1,
-            },
-        ).sort("interview_date", -1)
-        return [_serialize_session_summary(doc) for doc in cursor if doc.get("session_id")]
-    finally:
-        if client is not None:
-            client.close()
+    candidate_oid = _as_object_id(candidate_id, "candidate_id")
+    collection = _get_collection()
+    query: Dict[str, Any] = {
+        "candidate_id": candidate_oid,
+        "interview_status": {"$in": ["paused", "active"]},
+        "$or": [
+            {"interview_feedback": None},
+            {"interview_feedback": {"$exists": False}},
+        ],
+    }
+    cursor = collection.find(
+        query,
+        {
+            "session_id": 1,
+            "resume_id": 1,
+            "job_application_id": 1,
+            "role_applied_for": 1,
+            "interview_status": 1,
+            "interview_date": 1,
+            "paused_at": 1,
+        },
+    ).sort("interview_date", -1)
+    return [_serialize_session_summary(doc) for doc in cursor if doc.get("session_id")]
 
 
 def get_interview_by_session(session_id: str) -> Optional[Dict[str, Any]]:
     logger.info("[interview_record] get_by_session session_id=%s", session_id)
-    client = None
-    try:
-        client, collection = _get_collection()
-        doc = collection.find_one({"session_id": session_id})
-        if not doc:
-            logger.warning("[interview_record] no record for session_id=%s", session_id)
-            return None
-        return _serialize_doc(doc)
-    finally:
-        if client is not None:
-            client.close()
+    collection = _get_collection()
+    doc = collection.find_one({"session_id": session_id})
+    if not doc:
+        logger.warning("[interview_record] no record for session_id=%s", session_id)
+        return None
+    return _serialize_doc(doc)
 
 
 def append_chat_messages(session_id: str, messages: List[Dict[str, str]]) -> None:
     if not messages:
         return
     logger.info("[interview_record] append %s message(s) session_id=%s", len(messages), session_id)
-    client = None
-    try:
-        client, collection = _get_collection()
-        stamped = []
-        now = datetime.now(timezone.utc)
-        for m in messages:
-            stamped.append(
-                {
-                    "role": m.get("role", "user"),
-                    "content": m.get("content", ""),
-                    "ts": now,
-                }
-            )
-        collection.update_one(
-            {"session_id": session_id},
-            {"$push": {"messages": {"$each": stamped}}},
+    collection = _get_collection()
+    stamped = []
+    now = datetime.now(timezone.utc)
+    for m in messages:
+        stamped.append(
+            {
+                "role": m.get("role", "user"),
+                "content": m.get("content", ""),
+                "ts": now,
+            }
         )
-    finally:
-        if client is not None:
-            client.close()
+    collection.update_one(
+        {"session_id": session_id},
+        {"$push": {"messages": {"$each": stamped}}},
+    )
 
 
 def set_interview_summary(session_id: str, summary: str) -> None:
     logger.info("[interview_record] set summary session_id=%s chars=%s", session_id, len(summary or ""))
-    client = None
-    try:
-        client, collection = _get_collection()
-        collection.update_one(
-            {"session_id": session_id},
-            {"$set": {"interview_summary": summary or ""}},
-        )
-    finally:
-        if client is not None:
-            client.close()
+    collection = _get_collection()
+    collection.update_one(
+        {"session_id": session_id},
+        {"$set": {"interview_summary": summary or ""}},
+    )
 
 
 def append_interview_summary(session_id: str, new_summary_part: str) -> str:
     logger.info("[interview_record] append summary session_id=%s", session_id)
-    client = None
-    try:
-        client, collection = _get_collection()
-        doc = collection.find_one({"session_id": session_id}, {"interview_summary": 1})
-        if not doc:
-            raise ValueError("interview record not found")
-        updated = append_summary_text(doc.get("interview_summary") or "", new_summary_part)
-        collection.update_one(
-            {"session_id": session_id},
-            {"$set": {"interview_summary": updated}},
-        )
-        return updated
-    finally:
-        if client is not None:
-            client.close()
+    collection = _get_collection()
+    doc = collection.find_one({"session_id": session_id}, {"interview_summary": 1})
+    if not doc:
+        raise ValueError("interview record not found")
+    updated = append_summary_text(doc.get("interview_summary") or "", new_summary_part)
+    collection.update_one(
+        {"session_id": session_id},
+        {"$set": {"interview_summary": updated}},
+    )
+    return updated
 
 
 def set_last_summarized_message_count(session_id: str, count: int) -> None:
-    client = None
-    try:
-        client, collection = _get_collection()
-        collection.update_one(
-            {"session_id": session_id},
-            {"$set": {"last_summarized_message_count": count}},
-        )
-    finally:
-        if client is not None:
-            client.close()
+    collection = _get_collection()
+    collection.update_one(
+        {"session_id": session_id},
+        {"$set": {"last_summarized_message_count": count}},
+    )
 
 
 def get_message_count(session_id: str) -> int:
@@ -263,32 +232,38 @@ def get_message_count(session_id: str) -> int:
 def set_interview_status(session_id: str, status: str) -> None:
     """Set interview_status to active, paused, or completed."""
     logger.info("[interview_record] set status session_id=%s status=%s", session_id, status)
-    client = None
-    try:
-        client, collection = _get_collection()
-        update: Dict[str, Any] = {"interview_status": status}
-        if status == "paused":
-            update["paused_at"] = datetime.now(timezone.utc)
-        elif status == "active":
-            update["paused_at"] = None
-        collection.update_one({"session_id": session_id}, {"$set": update})
-    finally:
-        if client is not None:
-            client.close()
+    collection = _get_collection()
+    update: Dict[str, Any] = {"interview_status": status}
+    if status == "paused":
+        update["paused_at"] = datetime.now(timezone.utc)
+    elif status == "active":
+        update["paused_at"] = None
+    collection.update_one({"session_id": session_id}, {"$set": update})
 
 
 def save_interview_feedback(session_id: str, feedback: Dict[str, Any]) -> None:
     logger.info("[interview_record] save feedback session_id=%s", session_id)
-    client = None
-    try:
-        client, collection = _get_collection()
-        collection.update_one(
-            {"session_id": session_id},
-            {"$set": {"interview_feedback": feedback}},
-        )
-    finally:
-        if client is not None:
-            client.close()
+    collection = _get_collection()
+    collection.update_one(
+        {"session_id": session_id},
+        {"$set": {"interview_feedback": feedback}},
+    )
+
+
+def set_email_feedback_opt_in(session_id: str, opt_in: bool) -> None:
+    collection = _get_collection()
+    collection.update_one(
+        {"session_id": session_id},
+        {"$set": {"email_feedback_opt_in": bool(opt_in)}},
+    )
+
+
+def mark_feedback_email_sent(session_id: str) -> None:
+    collection = _get_collection()
+    collection.update_one(
+        {"session_id": session_id},
+        {"$set": {"feedback_email_sent": True}},
+    )
 
 
 def _serialize_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -306,6 +281,8 @@ def _serialize_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
         "paused_at": paused_at.isoformat() if hasattr(paused_at, "isoformat") else paused_at,
         "interview_summary": doc.get("interview_summary") or "",
         "interview_feedback": doc.get("interview_feedback"),
+        "email_feedback_opt_in": bool(doc.get("email_feedback_opt_in")),
+        "feedback_email_sent": bool(doc.get("feedback_email_sent")),
         "messages": [
             {
                 "role": m.get("role"),

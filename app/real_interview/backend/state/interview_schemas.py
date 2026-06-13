@@ -19,6 +19,16 @@ class InterviewPanelPlan(BaseModel):
     routing_rationale: str = Field(default="")
 
 
+class PanelResponsePlan(BaseModel):
+    """Panel coordinator: which interviewers speak next (live panel)."""
+
+    speaker_indices: List[int] = Field(
+        default_factory=list,
+        description="0-based indices into selected_interviewers; 1–2 speakers per turn.",
+    )
+    rationale: str = Field(default="")
+
+
 class InterviewerTurnResult(BaseModel):
     """Optional structured metadata for an interviewer turn."""
 

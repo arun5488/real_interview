@@ -37,5 +37,11 @@ class InterviewPipelineState(TypedDict, total=False):
     candidate_post_interview_feedback: dict[str, Any]
     interview_complete: bool
 
+    # active | awaiting_candidate_questions | candidate_qa
+    interview_phase: str
+    interviewer_question_counts: dict[str, int]
+    candidate_qa_turns: int
+    pending_auto_complete: bool
+
     error: Optional[str]
     step: str

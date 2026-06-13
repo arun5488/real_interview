@@ -3,7 +3,7 @@ name = "real-interview"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "dnspython>=2.0.0",
     "pymongo>=4.12,<4.17",
@@ -12,6 +12,8 @@ dependencies = [
     "flask",
     "langchain-openai>=1.2.1",
     "pypdf>=6.11.0",
+    "python-docx>=1.1.0",
+    "legacy-doc>=0.2.1",
     "pyyaml>=6.0.0",
     "langgraph>=1.2.0",
     "langchain-core>=0.3.0",

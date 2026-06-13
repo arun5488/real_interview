@@ -9,7 +9,9 @@ from pymongo.errors import CollectionInvalid, PyMongoError
 
 from app.real_interview import logger
 from app.real_interview.backend.config.configuration import get_question_bank_config
-from app.real_interview.backend.utils.mongodb import connect_mongodb
+from app.real_interview.backend.utils.mongodb import get_mongodb_database
+
+_question_bank_ready = False
 
 _VALID_LEVELS = frozenset({"junior", "mid", "senior"})
 
@@ -55,24 +57,26 @@ def _collection_name() -> str:
     return os.getenv("MONGODB_COLLECTION_QUESTION_BANK", "interview_question_bank").strip()
 
 
-def _get_collection() -> tuple[Any, Collection]:
-    client = connect_mongodb()
-    db = client[os.getenv("MONGODB_DB_NAME", "real_interview").strip()]
+def _get_collection() -> Collection:
+    global _question_bank_ready
+    db = get_mongodb_database()
     coll_name = _collection_name()
-    names = set(db.list_collection_names())
-    if coll_name not in names:
-        try:
-            db.create_collection(coll_name)
-            logger.info("[question_bank] created collection %r", coll_name)
-        except CollectionInvalid:
-            pass
-    collection = db[coll_name]
-    collection.create_index(
-        [("job_role_key", 1), ("experience_level", 1)],
-        unique=True,
-        name="unique_role_level",
-    )
-    return client, collection
+    if not _question_bank_ready:
+        names = set(db.list_collection_names())
+        if coll_name not in names:
+            try:
+                db.create_collection(coll_name)
+                logger.info("[question_bank] created collection %r", coll_name)
+            except CollectionInvalid:
+                pass
+        collection = db[coll_name]
+        collection.create_index(
+            [("job_role_key", 1), ("experience_level", 1)],
+            unique=True,
+            name="unique_role_level",
+        )
+        _question_bank_ready = True
+    return db[coll_name]
 
 
 def load_question_seeds(job_role: str, experience_level: str) -> List[Dict[str, Any]]:
@@ -82,9 +86,8 @@ def load_question_seeds(job_role: str, experience_level: str) -> List[Dict[str, 
     if not role_key:
         return []
 
-    client = None
     try:
-        client, collection = _get_collection()
+        collection = _get_collection()
         doc = collection.find_one({"job_role_key": role_key, "experience_level": level})
         if not doc:
             logger.info("[question_bank] no bank for role=%s level=%s", role_key, level)
@@ -96,9 +99,6 @@ def load_question_seeds(job_role: str, experience_level: str) -> List[Dict[str, 
     except Exception:
         logger.exception("[question_bank] load_question_seeds failed role=%s", role_key)
         return []
-    finally:
-        if client is not None:
-            client.close()
 
 
 def filter_seeds_for_interviewer(
@@ -144,9 +144,8 @@ def append_questions_to_bank(
     cfg = get_question_bank_config()
     max_per_bucket = int(cfg.get("max_questions_per_bucket", 200))
 
-    client = None
     try:
-        client, collection = _get_collection()
+        collection = _get_collection()
         doc = collection.find_one({"job_role_key": role_key, "experience_level": level}) or {}
         existing = list(doc.get("questions") or [])
         known_hashes = {hash_question_text((q.get("text") or "")) for q in existing if isinstance(q, dict)}
@@ -207,6 +206,3 @@ def append_questions_to_bank(
     except Exception:
         logger.exception("[question_bank] append unexpected error role=%s", role_key)
         return 0
-    finally:
-        if client is not None:
-            client.close()

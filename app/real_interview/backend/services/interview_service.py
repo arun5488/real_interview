@@ -1,8 +1,10 @@
+import os
 from typing import Any, Dict, List
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from app.real_interview import logger
+from app.real_interview.backend.auth.email_utils import find_user_by_id, normalize_email
 from app.real_interview.backend.graphs.interview_graph import (
     get_advance_graph,
     get_chat_graph,
@@ -11,6 +13,81 @@ from app.real_interview.backend.graphs.interview_graph import (
     make_thread_id,
 )
 from app.real_interview.backend.services import interview_record as interview_db
+from app.real_interview.backend.services.email_service import (
+    interview_feedback_email_enabled,
+    is_smtp_available,
+    send_interview_feedback_email,
+)
+from app.real_interview.backend.utils.mongodb import get_mongodb_database
+
+
+def _users_collection_name() -> str:
+    return os.getenv("MONGODB_COLLECTION_USERS", "authentications").strip()
+
+
+def _candidate_email_for_record(record: Dict[str, Any]) -> str:
+    candidate_id = record.get("candidate_id")
+    if not candidate_id:
+        return ""
+    users = get_mongodb_database()[_users_collection_name()]
+    user_doc = find_user_by_id(users, str(candidate_id))
+    if not user_doc:
+        return ""
+    return normalize_email(str(user_doc.get("email") or ""))
+
+
+def _should_email_feedback(
+    record: Dict[str, Any],
+    *,
+    email_feedback: bool | None,
+) -> bool:
+    if not interview_feedback_email_enabled() or not is_smtp_available():
+        return False
+    if record.get("feedback_email_sent"):
+        return False
+    if email_feedback is not None:
+        return bool(email_feedback)
+    return bool(record.get("email_feedback_opt_in"))
+
+
+def _maybe_send_feedback_email(
+    *,
+    session_id: str,
+    record: Dict[str, Any],
+    feedback: Dict[str, Any],
+    email_feedback: bool | None,
+) -> tuple[bool, str]:
+    if not _should_email_feedback(record, email_feedback=email_feedback):
+        return False, ""
+    candidate_email = _candidate_email_for_record(record)
+    ok, err = send_interview_feedback_email(
+        candidate_email=candidate_email,
+        feedback=feedback,
+        role_applied_for=record.get("role_applied_for") or "",
+        session_id=session_id,
+    )
+    if ok:
+        interview_db.mark_feedback_email_sent(session_id)
+    return ok, err
+
+
+def set_interview_preferences(
+    *,
+    session_id: str,
+    email_feedback_opt_in: bool,
+) -> Dict[str, Any]:
+    record = interview_db.get_interview_by_session(session_id)
+    if not record:
+        return {"status_code": 404, "error": "interview session not found", "session_id": session_id}
+    interview_db.set_email_feedback_opt_in(session_id, email_feedback_opt_in)
+    record = interview_db.get_interview_by_session(session_id) or {}
+    state = _get_merged_state(session_id)
+    return {
+        "status_code": 200,
+        "session_id": session_id,
+        "email_feedback_opt_in": bool(email_feedback_opt_in),
+        "state": _public_state(state, record) if state else _public_state({"session_id": session_id}, record),
+    }
 
 
 def _config(thread_id: str) -> Dict[str, Any]:
@@ -69,6 +146,11 @@ def _public_state(state: Dict[str, Any], record: Dict[str, Any] | None = None) -
         "active_interviewer_index": state.get("active_interviewer_index"),
         "running_summary": summary,
         "interview_status": interview_status,
+        "interview_phase": state.get("interview_phase") or "active",
+        "candidate_qa_turns": int(state.get("candidate_qa_turns") or 0),
+        "interviewer_question_counts": state.get("interviewer_question_counts") or {},
+        "email_feedback_opt_in": bool(record.get("email_feedback_opt_in")) if record else False,
+        "feedback_email_sent": bool(record.get("feedback_email_sent")) if record else False,
         "candidate_post_interview_feedback": feedback,
         "interview_complete": state.get("interview_complete"),
         "step": state.get("step"),
@@ -402,6 +484,10 @@ def send_interview_message(*, session_id: str, message: str, thread_id: str | No
     last_count = int(state.get("last_summarized_message_count") or 0)
     interview_db.set_last_summarized_message_count(session_id, last_count)
 
+    if state.get("pending_auto_complete"):
+        logger.info("[interview_service] auto-completing session_id=%s", session_id)
+        return complete_interview(session_id=session_id)
+
     record = interview_db.get_interview_by_session(session_id) or {}
     return {
         "status_code": 200,
@@ -411,40 +497,27 @@ def send_interview_message(*, session_id: str, message: str, thread_id: str | No
 
 
 def advance_to_next_interviewer(*, session_id: str, thread_id: str | None = None) -> Dict[str, Any]:
+    """Legacy endpoint — live panel interviews no longer use sequential handoffs."""
     if thread_id and not session_id:
         session_id = thread_id
-    logger.info("[interview_service] advance session_id=%s", session_id)
     record = interview_db.get_interview_by_session(session_id)
     if not record:
         return {"status_code": 404, "error": "interview session not found", "session_id": session_id}
-    _restore_checkpoint_if_missing(session_id)
-    blocked = _require_active_interview(record)
-    if blocked:
-        blocked["session_id"] = session_id
-        return blocked
-    try:
-        get_advance_graph().invoke({}, _config(session_id))
-    except Exception as exc:
-        logger.exception("[interview_service] advance failed session_id=%s", session_id)
-        return {"status_code": 500, "error": str(exc), "session_id": session_id}
-
     state = _get_merged_state(session_id)
-    record = interview_db.get_interview_by_session(session_id) or {}
-    _persist_new_messages(session_id, state, record)
-    record = interview_db.get_interview_by_session(session_id) or {}
     return {
-        "status_code": 200,
+        "status_code": 409,
         "session_id": session_id,
-        "state": _public_state(state, record),
-        "message": (
-            "Advanced to next interviewer."
-            if not state.get("interview_complete")
-            else "All interviews complete."
-        ),
+        "error": "Panel interviews are continuous. Reply in chat — the panel will follow up based on your answer.",
+        "state": _public_state(state, record) if state else _public_state({"session_id": session_id}, record),
     }
 
 
-def complete_interview(*, session_id: str, thread_id: str | None = None) -> Dict[str, Any]:
+def complete_interview(
+    *,
+    session_id: str,
+    thread_id: str | None = None,
+    email_feedback: bool | None = None,
+) -> Dict[str, Any]:
     if thread_id and not session_id:
         session_id = thread_id
     logger.info("[interview_service] complete session_id=%s", session_id)
@@ -484,12 +557,32 @@ def complete_interview(*, session_id: str, thread_id: str | None = None) -> Dict
             feedback.get("interview_decision"),
         )
 
-    record = interview_db.get_interview_by_session(session_id) or {}
+    feedback_email_sent = False
+    feedback_email_error = ""
+    if feedback:
+        sent, err = _maybe_send_feedback_email(
+            session_id=session_id,
+            record=record,
+            feedback=feedback,
+            email_feedback=email_feedback,
+        )
+        feedback_email_sent = sent
+        feedback_email_error = err
+        if sent:
+            record = interview_db.get_interview_by_session(session_id) or {}
+
+    message = "Interview feedback generated."
+    if feedback_email_sent:
+        message = "Interview feedback generated and emailed to your account address."
+    elif feedback and _should_email_feedback(record, email_feedback=email_feedback) and feedback_email_error:
+        message = "Interview feedback generated, but the email could not be sent."
+
     return {
         "status_code": 200,
         "session_id": session_id,
         "state": _public_state(state, record),
-        "message": "Interview feedback generated.",
+        "message": message,
+        "feedback_email_sent": feedback_email_sent,
     }
 
 

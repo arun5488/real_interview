@@ -359,6 +359,26 @@ label.confirm-delete input {
   padding: 1rem;
   font-size: 0.78rem;
   color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.site-footer .footer-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.site-footer .footer-link:hover {
+  text-decoration: underline;
+}
+
+.optional {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.85em;
 }
 
 .site-footer code {
@@ -446,6 +466,22 @@ label.confirm-delete input {
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-bottom: 0.5rem;
+  align-items: center;
+}
+
+.email-feedback-opt {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+  margin: 0 0 0.15rem;
+  cursor: pointer;
+}
+
+.email-feedback-opt input {
+  margin-top: 0.2rem;
 }
 
 .interview-context {
@@ -466,4 +502,102 @@ label.confirm-delete input {
 #interview-context-preview {
   max-height: 180px;
   margin-top: 0.5rem;
+}
+
+.admin-page .admin-layout {
+  max-width: 960px;
+}
+
+.admin-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.admin-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.admin-period {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.admin-period select {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.metric-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+  background: var(--bg);
+}
+
+.metric-label {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
+.metric-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.admin-section-title {
+  margin: 1.25rem 0 0.65rem;
+  font-size: 1rem;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  font-size: 0.88rem;
+}
+
+.admin-generated {
+  margin: 0 0 1rem;
+}
+
+.status-pill {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+}
+
+.status-active {
+  color: var(--accent);
+}
+
+.status-paused {
+  color: var(--muted);
+}
+
+.status-completed {
+  color: var(--ok);
 }

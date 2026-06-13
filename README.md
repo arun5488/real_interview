@@ -1,9 +1,17 @@
 # Real Interview
 
-Flask application that guides a candidate from account setup through resume upload, job application, and an AI-driven mock interview. The web UI is served from the same server as the backend.
+An Agentic AI application simulates a real job interview for a given Resume/CV and a Job Application/description. The app analyzes the candidate's CV and sets up the interview Panel based on the experience of the candidate. Once the interview concludes, App analyzes the conversation and generates feedback for the recruiter for the POV of the panel.
+
+Users can use this app to practice before going for the actual interview.
+
+**Live site:** [https://real-interview-lpd6.onrender.com/](https://real-interview-lpd6.onrender.com/)  
+**Admin dashboard:** [https://real-interview-lpd6.onrender.com/admin](https://real-interview-lpd6.onrender.com/admin)  
+**Feedback:** [https://real-interview-lpd6.onrender.com/feedback](https://real-interview-lpd6.onrender.com/feedback)
+
+Local development: `http://localhost:5000` (app), `http://localhost:5000/admin` (admin), and `http://localhost:5000/feedback` (feedback).
 
 ## 🎯 Vision
-Build an Agentic AI application that simulates mock interviews based on a candidate’s resume and job description.  
+Build an Agentic AI application that simulates job interviews based on a candidate’s resume and job description.  
 Initial form: **chat-based app** → later extended with analytics, personalization, and enterprise features.
 
 ## Project layout
@@ -13,8 +21,9 @@ app/real_interview/
 ├── backend/
 │   ├── app_factory.py          # Flask app, blueprint registration, static UI routes
 │   ├── server.py               # Entry point — run this to start the server
-│   ├── routes/                 # HTTP layer (users, resumes, jobs, interview)
-│   ├── services/               # Business logic and MongoDB persistence
+│   ├── routes/                 # HTTP layer (users, resumes, jobs, interview, admin, feedback)
+│   ├── auth/                   # JWT, cookies, rate limits, admin access
+│   ├── services/               # Business logic, MongoDB persistence, SMTP email
 │   ├── agents/                 # LLM agents (resume, job, interview panel)
 │   ├── graphs/                 # LangGraph interview workflows
 │   ├── nodes/                  # LangGraph node implementations
@@ -22,8 +31,8 @@ app/real_interview/
 │   ├── tools/                  # External tools (e.g. Tavily web search)
 │   ├── config/                 # Loads params.yaml for interview tuning
 │   ├── llm/                    # OpenAI client wrapper
-│   └── utils/                  # MongoDB connection and shared helpers
-├── frontend/                   # Static UI (HTML, CSS, JavaScript)
+│   └── utils/                  # MongoDB connection, log sanitization
+├── frontend/                   # Static UI (index.html, admin.html, feedback.html, *.js)
 └── data/                       # Reserved data paths (config, transcripts, etc.)
 
 params.yaml                     # Interview summarizer/feedback thresholds (project root)
@@ -39,10 +48,12 @@ params.yaml                     # Interview summarizer/feedback thresholds (proj
 **Objective:** Deliver a secure, working chat-based mock interview app.
 
 ### Features
-- Resume upload (PDF/DOC).
+- Resume upload (PDF, DOC, or DOCX).
 - Job description input parsing.
 - Chat interview simulation.
 - Feedback summary (strengths, weaknesses, improvements).
+- Website feedback page — visitors email suggestions and bug reports to the site owner.
+- Admin dashboard for signups and usage metrics.
 
 
 **Do not commit `.env`** — it contains secrets. Use `.env_copy` or similar as a template without real keys.
@@ -53,7 +64,7 @@ params.yaml                     # Interview summarizer/feedback thresholds (proj
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.11+ (required for legacy `.doc` text extraction)
 - MongoDB running and reachable via `MONGODB_URI`
 - Valid `OPENAI_API_KEY` and `TAVILY_API_KEY` in `.env`
 - `JWT_SECRET_KEY` (32+ random characters) for production, or `ALLOW_INSECURE_JWT_DEV=true` for local dev only
@@ -120,6 +131,13 @@ Copy from `.env_copy` and set these on your host (never commit real `.env`):
 | `OPENAI_API_KEY` | Yes | |
 | `TAVILY_API_KEY` | Yes | Interviewer web search |
 | `JWT_SECRET_KEY` | Yes | Local: generate with `secrets.token_hex(32)`. Render: auto-generated via `generateValue: true` in `render.yaml` |
+| `ADMIN_EMAILS` | Yes (admin) | Comma-separated signup emails allowed to open `/admin` |
+| `FEEDBACK_TO_EMAIL` | Yes (feedback) | Inbox for `/feedback` submissions; defaults to first `ADMIN_EMAILS` if unset |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` | Yes (feedback) | Outbound mail (e.g. Gmail + [app password](https://support.google.com/accounts/answer/185833)) |
+| `SMTP_USE_TLS` | Optional | Default `true` (port `587`) |
+| `SEND_INTERVIEW_FEEDBACK_EMAIL` | Optional | Default `true` — allow emailing post-interview feedback when the candidate opts in |
+| `FEEDBACK_FROM_EMAIL` | Optional | Sender address; defaults to `SMTP_USER` |
+| `FEEDBACK_FROM_NAME` | Optional | Display name in the From header (default `Real Interview`) |
 | `COOKIE_SECURE` | Yes (HTTPS) | Set `true` on public HTTPS hosts |
 | `MONGODB_*` collections | Yes | See `.env_copy` for names |
 | `WEB_CONCURRENCY` | Recommended | `1` on Render free (512 MB); `2` on paid plans |
@@ -131,9 +149,9 @@ Do **not** set `ALLOW_INSECURE_JWT_DEV` on a public host.
 
 1. Push the repo to GitHub.
 2. In [Render](https://render.com), **New → Blueprint** and point at `render.yaml`.
-3. When prompted, enter only: `MONGODB_URI`, `OPENAI_API_KEY`, `TAVILY_API_KEY`.
+3. When prompted, enter `MONGODB_URI`, `OPENAI_API_KEY`, `TAVILY_API_KEY`, `ADMIN_EMAILS`, and SMTP vars for feedback email (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, `FEEDBACK_TO_EMAIL`).
 4. Deploy. Render auto-generates `JWT_SECRET_KEY` (random 256-bit secret, stored in the dashboard — not in git).
-5. Open the service URL — the first visit after idle may take ~30–60s while the app wakes up.
+5. Open [https://real-interview-lpd6.onrender.com/](https://real-interview-lpd6.onrender.com/) — the first visit after idle may take ~30–60s while the app wakes up.
 
 **Free tier notes:** service sleeps after ~15 minutes with no traffic; any visit wakes it. You get 750 instance-hours/month. For always-on hosting, change `plan: free` to `plan: starter` in `render.yaml`.
 
@@ -178,7 +196,8 @@ Copy `MONGODB_URI` from your local `.env` exactly (no leading/trailing spaces).
 2. Upload a resume and save a job application.
 3. Start interview — confirm HR summary and `[I1]` opening message.
 4. Pause and resume — summary should carry over.
-5. End interview — feedback saved; sign out clears the session.
+5. End interview — post-interview feedback saved; sign out clears the session.
+6. Open **Send feedback** (footer link or `/feedback`) — confirm the message arrives in your inbox.
 
 ### Open the UI
 
@@ -193,13 +212,110 @@ Use port **5000** unless you set `PORT` to something else in `.env`.
 ### Typical flow in the UI
 
 1. **Sign up** or **Log in**
-2. **Upload resume** (PDF) or **Fetch resume** to select an existing one
+2. **Upload resume** (PDF, DOC, or DOCX) or **Fetch resume** to select an existing one
 3. **Continue to job application** — job link or pasted description, then save
-4. **Start interview** — HR summary and panel load; chat with interviewers (`[I1]`, `[I2]`, …)
+4. **Start interview** — HR summary and panel load; all panelists are present in a live session (`[I1]`, `[I2]`, …)
 5. **Pause interview** — conversation is summarized and saved; resume later with that context
 6. **Resume interview** — continue the same session
-7. **Next interviewer** / **End interview** when appropriate; feedback appears after completion
-8. **Sign out** clears the browser session
+7. **Answer in chat** — the panel picks follow-up questions from your replies (one or two interviewers may respond per turn)
+8. **End interview** when ready — post-interview feedback appears after completion
+9. **Send feedback** (footer link) — report bugs or ideas about the site itself
+10. **Sign out** clears the browser session
+
+## Admin dashboard
+
+Operators can view signups and usage metrics at **`/admin`**.
+
+| Environment | URL |
+|-------------|-----|
+| Production | [https://real-interview-lpd6.onrender.com/admin](https://real-interview-lpd6.onrender.com/admin) |
+| Local | [http://localhost:5000/admin](http://localhost:5000/admin) |
+
+### Access
+
+There is no separate admin account. Access is controlled by **`ADMIN_EMAILS`** in `.env` / Render environment variables:
+
+```env
+ADMIN_EMAILS=you@example.com,other@example.com
+```
+
+1. Sign up on the main app with an email listed in `ADMIN_EMAILS` (must match exactly).
+2. Open `/admin` and log in with that same email and password.
+3. Non-admin users see **Access denied** after login.
+
+### What the dashboard shows
+
+**Usage metrics** (filterable by 7 / 30 / 90 days):
+
+| Metric | Description |
+|--------|-------------|
+| Total users | All registered accounts |
+| New today / 7 days / period | Recent signups |
+| Interviews total | All interview sessions |
+| In progress | `interview_status` = active |
+| Paused | Paused interviews |
+| Completed | Completed or has feedback |
+| Not started | Interview created, no chat messages yet |
+| Resumes / job applications | Total uploads and saved applications |
+
+**Tables:**
+
+- **Recent signups** — email, signup time, user ID
+- **Recent interviews** — candidate email, role, status, message count, start time
+
+### Admin API (JWT + admin email required)
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/admin/access` | Check if the signed-in user is an admin |
+| `GET /api/admin/dashboard?days=30&limit=50` | Full metrics and tables (JSON) |
+
+---
+
+## Website feedback page
+
+Visitors can send **site feedback** (bugs, feature ideas, usability notes) at **`/feedback`**. This is separate from **post-interview feedback**, which is generated by the AI after you end a mock interview.
+
+| Environment | URL |
+|-------------|-----|
+| Production | [https://real-interview-lpd6.onrender.com/feedback](https://real-interview-lpd6.onrender.com/feedback) |
+| Local | [http://localhost:5000/feedback](http://localhost:5000/feedback) |
+
+The main app footer includes a **Send feedback** link. No account is required, but signed-in users have their email prefilled automatically.
+
+### How it works
+
+1. User picks a **category** (general, bug, feature, usability, other) and writes a message (10–5000 characters).
+2. Optional **contact email** — used as `Reply-To` so you can respond directly.
+3. `POST /api/feedback` sends the submission to your mailbox via SMTP. Nothing is stored in MongoDB.
+4. Rate limit: **5 submissions per IP per hour** (MongoDB-backed, shared across workers).
+
+If SMTP is not configured, the page returns **503** and shows a friendly error.
+
+### SMTP configuration
+
+Copy from `.env_copy` and set on your host. Example with Gmail (use an [app password](https://support.google.com/accounts/answer/185833), not your normal login password):
+
+```env
+FEEDBACK_TO_EMAIL=you@example.com
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@gmail.com
+SMTP_PASSWORD=your-16-char-app-password
+SMTP_USE_TLS=true
+```
+
+`FEEDBACK_TO_EMAIL` is the inbox that receives submissions. If omitted, the first address in `ADMIN_EMAILS` is used.
+
+**What you receive:** subject line includes category (and contact email when provided); body includes the message, optional contact address, signed-in user info (if logged in), and client IP.
+
+**Privacy:** email addresses are masked in server logs (e.g. `a***@example.com`).
+
+### Feedback API
+
+| Endpoint | Auth | Purpose |
+|----------|------|---------|
+| `POST /api/feedback` | Optional (cookie JWT) | Submit website feedback; body: `{ "message", "category?", "contact_email?" }` |
 
 ---
 
@@ -230,7 +346,20 @@ The example below is **illustrative** — actual questions and tone depend on yo
 }
 ```
 
-### Chat transcript (excerpt)
+### Live panel chat (excerpt)
+
+All panelists are in the room from the start. After each answer, a **panel coordinator** picks who should follow up (often 1–2 interviewers per turn). Questions are grounded in what you just said — no manual handoff between interviewers.
+
+**Session limits** (configurable in `params.yaml` → `interview.limits`):
+
+| Limit | Default | Behavior |
+|-------|---------|----------|
+| `max_questions_per_interviewer` | 8 | Each panel member (`I1`, `I2`, …) may ask up to 8 technical questions |
+| `max_candidate_qa_turns` | 2 | After all panelists reach their limit, the panel invites your questions; up to 2 Q&A rounds, then the session auto-ends |
+
+If you reply that you have **no questions** when invited, the interview ends immediately and post-interview feedback is generated. You can still click **End interview** early at any time.
+
+**Email feedback:** Before or during the interview, check **Email feedback to my account address** on the chat screen. When the session ends (manually or automatically), structured feedback is sent to the email you signed up with — requires SMTP configuration (same as the `/feedback` page) and `SEND_INTERVIEW_FEEDBACK_EMAIL=true`.
 
 ```
 [I1]: Hi Alex, I'm on the engineering panel. I've reviewed your background on the payments service —
@@ -263,7 +392,9 @@ After a few more exchanges, the candidate clicks **Pause interview**. The summar
 
 > **Saved summary (excerpt):** Candidate explained idempotent payments with header keys and unique indexes; discussed 503 behavior when dependencies fail. Second interviewer covered a production rollback, stakeholder communication, and post-incident process improvements (canary, load test).
 
-Status becomes **paused**; chat input is disabled until **Resume interview**. On resume, that summary is injected as context for the next interviewer turns so the panel does not “forget” earlier answers.
+Status becomes **paused**; chat input is disabled until **Resume interview**. On resume, that summary is injected as context for the next panel follow-ups so interviewers do not “forget” earlier answers.
+
+If you sign out or open the app in a new browser session, logging back in automatically restores a **paused or in-progress** interview (or use **Continue interview** on the upload/job screens).
 
 ### End interview — sample feedback
 
@@ -293,4 +424,4 @@ This feedback appears in the UI under **Post-interview feedback**; the full mess
 
 ## Dependencies
 
-See `requirements.txt`: Flask, PyMongo, bcrypt, pypdf, python-dotenv, PyYAML, langchain-openai, langgraph, langchain-core, tavily-python.
+See `requirements.txt`: Flask, PyMongo, bcrypt, pypdf, python-docx, legacy-doc, python-dotenv, PyYAML, langchain-openai, langgraph, langchain-core, tavily-python.

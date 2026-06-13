@@ -6,7 +6,7 @@ from typing import Any, Callable, Union
 from flask import jsonify, request
 
 from app.real_interview import logger
-from app.real_interview.backend.utils.mongodb import connect_mongodb
+from app.real_interview.backend.utils.mongodb import get_mongodb_database
 
 KeyFunc = Union[str, Callable[[], str]]
 
@@ -32,37 +32,33 @@ def _ensure_utc_aware(value: datetime | None) -> datetime | None:
 
 
 def _check_rate_limit(key: str, max_attempts: int, window_seconds: int) -> tuple[bool, int]:
-    client = connect_mongodb()
-    try:
-        coll = client[os.getenv("MONGODB_DB_NAME", "real_interview").strip()][_collection_name()]
-        now = datetime.now(timezone.utc)
-        doc = coll.find_one({"_id": key})
-        if not doc:
-            coll.replace_one(
-                {"_id": key},
-                {"_id": key, "count": 1, "reset_at": now + timedelta(seconds=window_seconds)},
-                upsert=True,
-            )
-            return True, 0
-
-        reset_at = _ensure_utc_aware(doc.get("reset_at"))
-        if reset_at is None or reset_at < now:
-            coll.replace_one(
-                {"_id": key},
-                {"_id": key, "count": 1, "reset_at": now + timedelta(seconds=window_seconds)},
-                upsert=True,
-            )
-            return True, 0
-
-        count = int(doc.get("count") or 0)
-        if count >= max_attempts:
-            retry_after = max(1, int((reset_at - now).total_seconds()))
-            return False, retry_after
-
-        coll.update_one({"_id": key}, {"$inc": {"count": 1}})
+    coll = get_mongodb_database()[_collection_name()]
+    now = datetime.now(timezone.utc)
+    doc = coll.find_one({"_id": key})
+    if not doc:
+        coll.replace_one(
+            {"_id": key},
+            {"_id": key, "count": 1, "reset_at": now + timedelta(seconds=window_seconds)},
+            upsert=True,
+        )
         return True, 0
-    finally:
-        client.close()
+
+    reset_at = _ensure_utc_aware(doc.get("reset_at"))
+    if reset_at is None or reset_at < now:
+        coll.replace_one(
+            {"_id": key},
+            {"_id": key, "count": 1, "reset_at": now + timedelta(seconds=window_seconds)},
+            upsert=True,
+        )
+        return True, 0
+
+    count = int(doc.get("count") or 0)
+    if count >= max_attempts:
+        retry_after = max(1, int((reset_at - now).total_seconds()))
+        return False, retry_after
+
+    coll.update_one({"_id": key}, {"$inc": {"count": 1}})
+    return True, 0
 
 
 def enforce_rate_limit(*, scope: str, key: str, max_attempts: int, window_seconds: int) -> tuple[bool, int]:

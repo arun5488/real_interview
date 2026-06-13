@@ -23,3 +23,14 @@ console_handler.setFormatter(logging.Formatter("[ %(asctime)s ] %(lineno)d %(nam
 # Add both handlers
 logger.addHandler(file_handler)
 logger.addHandler(console_handler)
+
+
+def _attach_email_mask_filter() -> None:
+    from app.real_interview.backend.utils.log_sanitize import EmailMaskingFilter
+
+    email_mask_filter = EmailMaskingFilter()
+    file_handler.addFilter(email_mask_filter)
+    console_handler.addFilter(email_mask_filter)
+
+
+_attach_email_mask_filter()

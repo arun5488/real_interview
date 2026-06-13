@@ -155,10 +155,14 @@
           Continue to job application
         </button>
         <form id="form-upload" class="stack" enctype="multipart/form-data" novalidate>
-          <p class="hint">Or upload a new PDF resume.</p>
+          <p class="hint">Or upload a new resume (PDF, DOC, or DOCX).</p>
           <label>
-            PDF file
-            <input type="file" name="resume" accept="application/pdf,.pdf" />
+            Resume file
+            <input
+              type="file"
+              name="resume"
+              accept="application/pdf,.pdf,application/msword,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx"
+            />
           </label>
           <button type="submit" class="btn primary">Upload and process</button>
         </form>
@@ -248,6 +252,11 @@
           <summary>HR summary &amp; panel</summary>
           <pre id="interview-context-preview" class="result"></pre>
         </details>
+        <p class="hint">
+          The full panel is in the room. After each answer, one or more interviewers may follow up based on what
+          you said. Each panelist asks up to 8 questions, then you may ask the panel up to 2 questions before the
+          session ends.
+        </p>
         <div id="chat-messages" class="chat-messages" role="log" aria-live="polite" aria-relevant="additions"></div>
         <form id="form-chat" class="chat-form" novalidate>
           <label class="sr-only" for="chat-input">Your message</label>
@@ -262,11 +271,14 @@
           <button type="submit" class="btn primary">Send</button>
         </form>
         <div class="chat-actions">
+          <label class="email-feedback-opt">
+            <input type="checkbox" id="opt-email-feedback" />
+            Email feedback to my account address when the interview ends
+          </label>
           <button type="button" id="btn-pause-interview" class="btn secondary">Pause interview</button>
           <button type="button" id="btn-resume-interview" class="btn secondary is-hidden" hidden>
             Resume interview
           </button>
-          <button type="button" id="btn-advance-interviewer" class="btn secondary">Next interviewer</button>
           <button type="button" id="btn-end-interview" class="btn secondary">End interview</button>
         </div>
         <p id="chat-message" class="message" role="status" aria-live="polite"></p>
@@ -278,6 +290,7 @@
     </main>
 
     <footer class="site-footer">
+      <a href="/feedback" class="footer-link">Send feedback</a>
       <span
         >Uses <code>/api/users</code>, <code>/api/users/password</code>, <code>/api/resumes</code>, and
         <code>/api/job-applications</code>.</span

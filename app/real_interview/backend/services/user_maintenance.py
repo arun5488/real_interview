@@ -8,7 +8,9 @@ from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from app.real_interview import logger
 from app.real_interview.backend.auth.email_utils import find_user_by_email, normalize_email
-from app.real_interview.backend.utils.mongodb import connect_mongodb
+from app.real_interview.backend.utils.mongodb import get_mongodb_database
+
+_users_indexes_ready = False
 
 
 def _success(status_code: int, payload: Dict[str, Any] | None = None) -> Dict[str, Any]:
@@ -38,13 +40,13 @@ def _ensure_indexes(collection) -> None:
     logger.info("[user_maintenance] unique index ready")
 
 
-def _get_client_and_collection():
-    logger.info("[user_maintenance] opening MongoDB connection")
-    client = connect_mongodb()
-    db = client[_get_db_name()]
-    collection = db[_get_users_collection_name()]
-    _ensure_indexes(collection)
-    return client, collection
+def _get_collection():
+    global _users_indexes_ready
+    collection = get_mongodb_database(_get_db_name())[_get_users_collection_name()]
+    if not _users_indexes_ready:
+        _ensure_indexes(collection)
+        _users_indexes_ready = True
+    return collection
 
 
 def _password_meets_complexity(password: str) -> bool:
@@ -88,7 +90,6 @@ def sign_up_user(email: str, password: str, confirm_password: str) -> Dict[str, 
       423 - password mismatch or weak password
     """
     logger.info("[user_maintenance][POST] sign_up_user start")
-    client = None
 
     try:
         email = normalize_email(email)
@@ -104,7 +105,7 @@ def sign_up_user(email: str, password: str, confirm_password: str) -> Dict[str, 
             logger.warning("[user_maintenance][POST] weak password")
             return _error(423, "password mismatch or weak password")
 
-        client, collection = _get_client_and_collection()
+        collection = _get_collection()
 
         logger.info("[user_maintenance][POST] checking if email exists: %s", email)
         if find_user_by_email(collection, email):
@@ -141,10 +142,6 @@ def sign_up_user(email: str, password: str, confirm_password: str) -> Dict[str, 
     except Exception:
         logger.exception("[user_maintenance][POST] unexpected error")
         raise
-    finally:
-        if client is not None:
-            logger.info("[user_maintenance][POST] closing MongoDB connection")
-            client.close()
 
 
 def login_user(email: str, password: str) -> Dict[str, Any]:
@@ -157,7 +154,6 @@ def login_user(email: str, password: str) -> Dict[str, Any]:
       401 - invalid email or password
     """
     logger.info("[user_maintenance][POST] login_user start")
-    client = None
 
     try:
         email = normalize_email(email)
@@ -169,7 +165,7 @@ def login_user(email: str, password: str) -> Dict[str, Any]:
             logger.warning("[user_maintenance][POST] login invalid password")
             return _error(401, "invalid email or password")
 
-        client, collection = _get_client_and_collection()
+        collection = _get_collection()
 
         user_doc = find_user_by_email(collection, email)
         if not user_doc:
@@ -199,10 +195,6 @@ def login_user(email: str, password: str) -> Dict[str, Any]:
     except Exception:
         logger.exception("[user_maintenance][POST] login unexpected error")
         raise
-    finally:
-        if client is not None:
-            logger.info("[user_maintenance][POST] closing MongoDB connection")
-            client.close()
 
 
 def change_password(
@@ -223,7 +215,6 @@ def change_password(
       423 - password mismatch or weak password
     """
     logger.info("[user_maintenance][PUT] change_password start")
-    client = None
 
     try:
         email = normalize_email(email)
@@ -243,7 +234,7 @@ def change_password(
             logger.warning("[user_maintenance][PUT] weak password")
             return _error(423, "password mismatch or weak password")
 
-        client, collection = _get_client_and_collection()
+        collection = _get_collection()
 
         logger.info("[user_maintenance][PUT] checking if user exists: %s", email)
         user_doc = find_user_by_email(collection, email)
@@ -279,10 +270,6 @@ def change_password(
     except Exception:
         logger.exception("[user_maintenance][PUT] unexpected error")
         raise
-    finally:
-        if client is not None:
-            logger.info("[user_maintenance][PUT] closing MongoDB connection")
-            client.close()
 
 
 def delete_user(email: str, password: str) -> Dict[str, Any]:

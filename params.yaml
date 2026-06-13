@@ -16,3 +16,8 @@ interview:
     max_questions_per_bucket: 200
     # Max transcript chars sent to summarizer for question extraction.
     extract_max_chars: 12000
+  limits:
+    # Max technical questions each panel member may ask before the closing phase.
+    max_questions_per_interviewer: 8
+    # Max candidate-question / panel-answer rounds after the panel invites questions.
+    max_candidate_qa_turns: 2

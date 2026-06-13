@@ -13,6 +13,7 @@ from app.real_interview.backend.services.interview_service import (
     pause_interview,
     resume_interview,
     send_interview_message,
+    set_interview_preferences,
     start_interview,
 )
 from app.real_interview.backend.services.pdfreader import resume_reader
@@ -188,7 +189,38 @@ def interview_complete_route():
     if not ok:
         return err
 
-    result = complete_interview(session_id=session_id)
+    email_feedback = body.get("email_feedback")
+    if email_feedback is not None and not isinstance(email_feedback, bool):
+        return jsonify({"error": "email_feedback must be a boolean"}), 400
+
+    result = complete_interview(session_id=session_id, email_feedback=email_feedback)
+    return _response(result)
+
+
+@interview_blueprint.route("/interview/preferences", methods=["PUT"])
+@require_auth
+def interview_preferences_route():
+    logger.info("[interview][PUT /api/interview/preferences]")
+    body = _parse_json_body()
+    if body is None:
+        return jsonify({"error": "invalid JSON body"}), 400
+
+    session_id = body.get("session_id") or body.get("thread_id")
+    if not isinstance(session_id, str) or not session_id.strip():
+        return jsonify({"error": "session_id is required"}), 400
+
+    if "email_feedback_opt_in" not in body or not isinstance(body.get("email_feedback_opt_in"), bool):
+        return jsonify({"error": "email_feedback_opt_in (boolean) is required"}), 400
+
+    session_id = session_id.strip()
+    ok, err = _verify_interview_session(session_id)
+    if not ok:
+        return err
+
+    result = set_interview_preferences(
+        session_id=session_id,
+        email_feedback_opt_in=body["email_feedback_opt_in"],
+    )
     return _response(result)
 
 

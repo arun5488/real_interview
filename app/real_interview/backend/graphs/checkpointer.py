@@ -3,13 +3,11 @@ import threading
 from typing import Optional
 
 from langgraph.checkpoint.mongodb import MongoDBSaver
-from pymongo import MongoClient
 
 from app.real_interview import logger
-from app.real_interview.backend.utils.mongodb import connect_mongodb, get_mongodb_uri
+from app.real_interview.backend.utils.mongodb import get_shared_mongodb_client
 
 _lock = threading.Lock()
-_client: Optional[MongoClient] = None
 _checkpointer: Optional[MongoDBSaver] = None
 
 
@@ -32,7 +30,7 @@ def get_shared_checkpointer() -> MongoDBSaver:
     Checkpoints are stored in MongoDB so state survives restarts and is visible
     across Gunicorn workers.
     """
-    global _client, _checkpointer
+    global _checkpointer
     if _checkpointer is not None:
         return _checkpointer
 
@@ -40,10 +38,9 @@ def get_shared_checkpointer() -> MongoDBSaver:
         if _checkpointer is not None:
             return _checkpointer
 
-        uri = get_mongodb_uri()
-        _client = connect_mongodb(uri)
+        client = get_shared_mongodb_client()
         _checkpointer = MongoDBSaver(
-            _client,
+            client,
             db_name=_db_name(),
             checkpoint_collection_name=_checkpoint_collection(),
             writes_collection_name=_checkpoint_writes_collection(),

@@ -13,10 +13,11 @@ from pymongo.collection import Collection
 from pymongo.database import Database
 from pymongo.errors import CollectionInvalid, PyMongoError
 from pypdf import PdfReader
+from docx import Document
 
 from app.real_interview import logger
 from app.real_interview.backend.agents.resume_parse_agent import ResumeParseAgent
-from app.real_interview.backend.utils.mongodb import connect_mongodb
+from app.real_interview.backend.utils.mongodb import get_shared_mongodb_client
 
 load_dotenv()
 
@@ -43,6 +44,44 @@ def _get_gridfs_bucket() -> str:
     logger.info("inside _get_gridfs_bucket")
     bucket = os.getenv("MONGODB_GRIDFS_RESUME_BUCKET", "").strip()
     return bucket or "resume_pdf_fs"
+
+
+RESUME_EXTENSIONS = frozenset({".pdf", ".doc", ".docx"})
+RESUME_CONTENT_TYPES = {
+    "pdf": "application/pdf",
+    "doc": "application/msword",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+DEFAULT_RESUME_FILENAMES = {
+    "pdf": "resume.pdf",
+    "doc": "resume.doc",
+    "docx": "resume.docx",
+}
+
+
+def _file_extension(filename: Optional[str]) -> str:
+    if not filename:
+        return ""
+    return os.path.splitext(filename.lower().strip())[1]
+
+
+def detect_resume_format(*, data: bytes, filename: Optional[str] = None) -> str:
+    """Return pdf, doc, or docx based on magic bytes and filename."""
+    if data.startswith(b"%PDF"):
+        return "pdf"
+    if len(data) >= 4 and data[:4] == b"PK\x03\x04":
+        return "docx"
+    if len(data) >= 8 and data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        return "doc"
+
+    ext = _file_extension(filename)
+    if ext == ".pdf":
+        return "pdf"
+    if ext == ".docx":
+        return "docx"
+    if ext == ".doc":
+        return "doc"
+    raise ValueError("only PDF, DOC, and DOCX documents are allowed")
 
 
 def _as_user_object_id(userid: Union[str, ObjectId]) -> ObjectId:
@@ -107,8 +146,8 @@ def _overlay_scalar_fields(target: Dict[str, Any], overlay: Dict[str, Any]) -> N
 
 class resume_reader:
     """
-    Read resume PDFs, validate uploads, persist binaries in GridFS, and store
-    metadata plus extracted text in the resume collection from the environment.
+    Read resume documents (PDF, DOC, DOCX), validate uploads, persist binaries in GridFS,
+    and store metadata plus extracted text in the resume collection from the environment.
     """
 
     def __init__(
@@ -117,8 +156,8 @@ class resume_reader:
         parse_agent: Optional[ResumeParseAgent] = None,
     ) -> None:
         logger.info("inside __init__")
-        self._owns_client = client is None
-        self._client: MongoClient = client or connect_mongodb()
+        self._owns_client = client is not None
+        self._client: MongoClient = client or get_shared_mongodb_client()
         self._db: Database = self._client[_get_db_name()]
         self._collection_name = _get_resume_collection_name()
         self._gridfs_bucket = _get_gridfs_bucket()
@@ -160,21 +199,34 @@ class resume_reader:
         logger.info("[resume_reader] indexes ensured on %r", self._collection_name)
 
     @staticmethod
+    def validate_resume_file(
+        *,
+        data: bytes,
+        filename: Optional[str] = None,
+        content_type: Optional[str] = None,
+    ) -> str:
+        """Validate upload and return detected format: pdf, doc, or docx."""
+        logger.info("inside validate_resume_file")
+        _ = content_type  # reserved for callers (e.g. Flask)
+        if not data:
+            raise ValueError("file size must be greater than zero")
+        ext = _file_extension(filename)
+        if ext and ext not in RESUME_EXTENSIONS:
+            raise ValueError("only PDF, DOC, and DOCX documents are allowed")
+        return detect_resume_format(data=data, filename=filename)
+
+    @staticmethod
     def validate_pdf_file(
         *,
         data: bytes,
         filename: Optional[str] = None,
         content_type: Optional[str] = None,
     ) -> None:
-        logger.info("inside validate_pdf_file")
-        _ = content_type  # reserved for callers (e.g. Flask); validation uses bytes + filename
-        if not data:
-            raise ValueError("file size must be greater than zero")
-        if filename:
-            lower = filename.lower().strip()
-            if not lower.endswith(".pdf"):
-                raise ValueError("only PDF documents are allowed")
-        if not data.startswith(b"%PDF"):
+        """Backward-compatible PDF-only validation."""
+        fmt = resume_reader.validate_resume_file(
+            data=data, filename=filename, content_type=content_type
+        )
+        if fmt != "pdf":
             raise ValueError("only PDF documents are allowed")
 
     @staticmethod
@@ -192,6 +244,58 @@ class resume_reader:
             logger.exception("[resume_reader] failed to read PDF")
             raise ValueError("could not read PDF content") from exc
 
+    @staticmethod
+    def extract_raw_text_from_docx_bytes(data: bytes) -> str:
+        logger.info("inside extract_raw_text_from_docx_bytes")
+        try:
+            doc = Document(io.BytesIO(data))
+            parts: List[str] = []
+            for para in doc.paragraphs:
+                text = (para.text or "").strip()
+                if text:
+                    parts.append(text)
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        text = (cell.text or "").strip()
+                        if text:
+                            parts.append(text)
+            return "\n".join(parts).strip()
+        except Exception as exc:
+            logger.exception("[resume_reader] failed to read DOCX")
+            raise ValueError("could not read DOCX content") from exc
+
+    @staticmethod
+    def extract_raw_text_from_doc_bytes(data: bytes) -> str:
+        logger.info("inside extract_raw_text_from_doc_bytes")
+        try:
+            from legacy_doc import extract_text as extract_legacy_doc_text
+        except ImportError as exc:
+            raise ValueError(
+                "DOC upload requires Python 3.11 or newer. Use PDF or DOCX instead."
+            ) from exc
+        try:
+            result = extract_legacy_doc_text(data)
+            text = (result.text or "").strip()
+            if not text:
+                raise ValueError("document contained no readable text")
+            return text
+        except ValueError:
+            raise
+        except Exception as exc:
+            logger.exception("[resume_reader] failed to read DOC")
+            raise ValueError("could not read DOC content") from exc
+
+    @staticmethod
+    def extract_raw_text(data: bytes, fmt: str) -> str:
+        if fmt == "pdf":
+            return resume_reader.extract_raw_text_from_pdf_bytes(data)
+        if fmt == "docx":
+            return resume_reader.extract_raw_text_from_docx_bytes(data)
+        if fmt == "doc":
+            return resume_reader.extract_raw_text_from_doc_bytes(data)
+        raise ValueError("unsupported resume format")
+
     def save_resume(
         self,
         userid: Union[str, ObjectId],
@@ -201,19 +305,22 @@ class resume_reader:
         content_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         logger.info("inside save_resume")
-        self.validate_pdf_file(data=data, filename=original_filename, content_type=content_type)
+        fmt = self.validate_resume_file(
+            data=data, filename=original_filename, content_type=content_type
+        )
         user_oid = _as_user_object_id(userid)
 
         self.ensure_resume_collection()
-        raw_text = self.extract_raw_text_from_pdf_bytes(data)
+        raw_text = self.extract_raw_text(data, fmt)
         parsed_data = self._parse_agent.populate_parsed_data(raw_text)
         _overlay_scalar_fields(parsed_data, _heuristic_parse(raw_text))
 
-        safe_name = os.path.basename(original_filename) or "resume.pdf"
+        safe_name = os.path.basename(original_filename) or DEFAULT_RESUME_FILENAMES[fmt]
+        stored_content_type = content_type or RESUME_CONTENT_TYPES[fmt]
         file_id = self._fs.put(
             data,
             filename=safe_name,
-            content_type="application/pdf",
+            content_type=stored_content_type,
             metadata={"userid": user_oid, "uploaded_ts": datetime.now(timezone.utc)},
         )
 
@@ -254,6 +361,18 @@ class resume_reader:
         logger.info("[resume_reader] stored resume for user %s", user_oid)
         return out
 
+    def read_resume_stream(
+        self,
+        stream: BinaryIO,
+        *,
+        filename: Optional[str] = None,
+        content_type: Optional[str] = None,
+    ) -> bytes:
+        logger.info("inside read_resume_stream")
+        data = stream.read()
+        self.validate_resume_file(data=data, filename=filename, content_type=content_type)
+        return data
+
     def read_pdf_stream(
         self,
         stream: BinaryIO,
@@ -261,10 +380,10 @@ class resume_reader:
         filename: Optional[str] = None,
         content_type: Optional[str] = None,
     ) -> bytes:
-        logger.info("inside read_pdf_stream")
-        data = stream.read()
-        self.validate_pdf_file(data=data, filename=filename, content_type=content_type)
-        return data
+        """Backward-compatible alias."""
+        return self.read_resume_stream(
+            stream, filename=filename, content_type=content_type
+        )
 
     def list_resumes_for_user(self, userid: Union[str, ObjectId]) -> List[Dict[str, Any]]:
         """Return resume summaries for a user, newest upload first."""

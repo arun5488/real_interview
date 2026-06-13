@@ -13,7 +13,7 @@ from pymongo.errors import CollectionInvalid, PyMongoError
 
 from app.real_interview import logger
 from app.real_interview.backend.agents.job_application_agent import JobApplicationAgent
-from app.real_interview.backend.utils.mongodb import connect_mongodb
+from app.real_interview.backend.utils.mongodb import get_mongodb_database
 
 APPLICATION_LINK_NA = "NA"
 INPUT_MODE_LINK = "link"
@@ -173,21 +173,26 @@ def _ensure_job_application_indexes(collection) -> None:
     )
 
 
-def _get_collections() -> Tuple[Any, Any, Any]:
-    client = connect_mongodb()
-    db = client[_get_db_name()]
+_job_apps_ready = False
+
+
+def _get_collections() -> Tuple[Any, Any]:
+    global _job_apps_ready
+    db = get_mongodb_database(_get_db_name())
     users = db[_get_users_collection_name()]
     job_apps = db[_get_job_application_collection_name()]
-    names = set(db.list_collection_names())
-    coll_name = _get_job_application_collection_name()
-    if coll_name not in names:
-        try:
-            db.create_collection(coll_name)
-            logger.info("[job_application] created collection %r", coll_name)
-        except CollectionInvalid:
-            logger.warning("[job_application] collection %r already exists (race)", coll_name)
-    _ensure_job_application_indexes(job_apps)
-    return client, users, job_apps
+    if not _job_apps_ready:
+        names = set(db.list_collection_names())
+        coll_name = _get_job_application_collection_name()
+        if coll_name not in names:
+            try:
+                db.create_collection(coll_name)
+                logger.info("[job_application] created collection %r", coll_name)
+            except CollectionInvalid:
+                logger.warning("[job_application] collection %r already exists (race)", coll_name)
+        _ensure_job_application_indexes(job_apps)
+        _job_apps_ready = True
+    return users, job_apps
 
 
 def _customer_exists(users_collection, customer_oid: ObjectId) -> bool:
@@ -208,7 +213,6 @@ def submit_job_application(
     input_mode: ``link`` (fetch URL) or ``description`` (user-provided text).
     """
     logger.info("[job_application] submit_job_application start mode=%s", input_mode)
-    client = None
     agent = parse_agent if parse_agent is not None else JobApplicationAgent()
 
     try:
@@ -221,7 +225,7 @@ def submit_job_application(
         if mode not in (INPUT_MODE_LINK, INPUT_MODE_DESCRIPTION):
             return _error(400, "input_mode must be 'link' or 'description'")
 
-        client, users_coll, job_coll = _get_collections()
+        users_coll, job_coll = _get_collections()
         if not _customer_exists(users_coll, customer_oid):
             return _error(404, "customer not found")
 
@@ -301,9 +305,6 @@ def submit_job_application(
     except Exception:
         logger.exception("[job_application] unexpected error")
         raise
-    finally:
-        if client is not None:
-            client.close()
 
 
 def get_job_application_for_customer(
@@ -312,27 +313,22 @@ def get_job_application_for_customer(
 ) -> Dict[str, Any]:
     """Load one job application document owned by the customer."""
     logger.info("[job_application] get_job_application_for_customer start")
-    client = None
-    try:
-        customer_oid = _as_customer_object_id(customer_id)
-        app_oid = _as_customer_object_id(job_application_id)
-        client, users_coll, job_coll = _get_collections()
-        if not _customer_exists(users_coll, customer_oid):
-            raise ValueError("customer not found")
+    customer_oid = _as_customer_object_id(customer_id)
+    app_oid = _as_customer_object_id(job_application_id)
+    users_coll, job_coll = _get_collections()
+    if not _customer_exists(users_coll, customer_oid):
+        raise ValueError("customer not found")
 
-        doc = job_coll.find_one({"_id": app_oid, "customer_id": customer_oid})
-        if not doc:
-            raise ValueError("job application not found for this user")
+    doc = job_coll.find_one({"_id": app_oid, "customer_id": customer_oid})
+    if not doc:
+        raise ValueError("job application not found for this user")
 
-        ts = doc.get("job_application_ts")
-        return {
-            "job_application_id": str(doc["_id"]),
-            "customer_id": str(customer_oid),
-            "job_role": (doc.get("job_role") or "").strip(),
-            "application_link": (doc.get("application_link") or "").strip(),
-            "job_description": (doc.get("job_description") or "").strip(),
-            "job_application_ts": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
-        }
-    finally:
-        if client is not None:
-            client.close()
+    ts = doc.get("job_application_ts")
+    return {
+        "job_application_id": str(doc["_id"]),
+        "customer_id": str(customer_oid),
+        "job_role": (doc.get("job_role") or "").strip(),
+        "application_link": (doc.get("application_link") or "").strip(),
+        "job_description": (doc.get("job_description") or "").strip(),
+        "job_application_ts": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+    }

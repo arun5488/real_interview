@@ -12,6 +12,8 @@ from app.real_interview.backend.nodes.interview_nodes import (
     interviewer_turn_node,
     load_context_node,
     maybe_summarize_node,
+    panel_opening_node,
+    panel_turn_node,
     router_node,
     route_after_start,
     should_summarize,
@@ -19,12 +21,12 @@ from app.real_interview.backend.nodes.interview_nodes import (
 from app.real_interview.backend.state.interview_pipeline_state import InterviewPipelineState
 
 def _build_start_graph():
-    """HR + router + first interviewer opening."""
+    """HR + router + live panel opening."""
     graph = StateGraph(InterviewPipelineState)
     graph.add_node("load_context", load_context_node)
     graph.add_node("hr_recruiter", hr_recruiter_node)
     graph.add_node("router", router_node)
-    graph.add_node("interviewer_opening", interviewer_opening_node)
+    graph.add_node("panel_opening", panel_opening_node)
 
     graph.add_edge(START, "load_context")
     graph.add_conditional_edges(
@@ -40,21 +42,21 @@ def _build_start_graph():
     graph.add_conditional_edges(
         "router",
         route_after_start,
-        {"continue": "interviewer_opening", "end": END},
+        {"continue": "panel_opening", "end": END},
     )
-    graph.add_edge("interviewer_opening", END)
+    graph.add_edge("panel_opening", END)
     return graph.compile(checkpointer=get_shared_checkpointer())
 
 
 def _build_chat_graph():
-    """Candidate message → interviewer → optional summarize."""
+    """Candidate message → live panel follow-up → optional summarize."""
     graph = StateGraph(InterviewPipelineState)
-    graph.add_node("interviewer_turn", interviewer_turn_node)
+    graph.add_node("panel_turn", panel_turn_node)
     graph.add_node("summarize", maybe_summarize_node)
 
-    graph.add_edge(START, "interviewer_turn")
+    graph.add_edge(START, "panel_turn")
     graph.add_conditional_edges(
-        "interviewer_turn",
+        "panel_turn",
         should_summarize,
         {"summarize": "summarize", "skip_summarize": END},
     )

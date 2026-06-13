@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Real Interview — Feedback</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="feedback-page">
+    <header class="site-header">
+      <h1>Real Interview</h1>
+      <p class="tagline">Tell us what you think — bugs, ideas, or anything we can improve.</p>
+    </header>
+
+    <main class="layout">
+      <section class="card" aria-labelledby="feedback-heading">
+        <h2 id="feedback-heading">Send feedback</h2>
+        <p class="hint">
+          Your message is emailed to the site owner. Add your email if you would like a reply.
+        </p>
+        <form id="form-feedback" class="stack" novalidate>
+          <label>
+            Category
+            <select name="category">
+              <option value="general" selected>General</option>
+              <option value="bug">Bug / something broken</option>
+              <option value="feature">Feature request</option>
+              <option value="usability">Usability / design</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>
+            Your email <span class="optional">(optional)</span>
+            <input type="email" name="contact_email" autocomplete="email" placeholder="you@example.com" />
+          </label>
+          <label>
+            Message
+            <textarea
+              name="message"
+              rows="6"
+              required
+              minlength="10"
+              maxlength="5000"
+              placeholder="What worked well? What should we fix or add?"
+            ></textarea>
+          </label>
+          <button type="submit" class="btn primary">Send feedback</button>
+        </form>
+        <p class="auth-link-row">
+          <a href="/" class="btn link">Back to app</a>
+        </p>
+        <p id="feedback-message" class="message" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <script src="/feedback.js" defer></script>
+  </body>
+</html>

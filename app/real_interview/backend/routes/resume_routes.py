@@ -98,7 +98,7 @@ def upload_resume_route():
     reader: resume_reader | None = None
     try:
         reader = resume_reader()
-        data = reader.read_pdf_stream(
+        data = reader.read_resume_stream(
             file_storage.stream,
             filename=file_storage.filename,
             content_type=file_storage.content_type,

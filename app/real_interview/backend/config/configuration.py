@@ -19,6 +19,10 @@ _DEFAULT_INTERVIEW: Dict[str, Any] = {
         "max_questions_per_bucket": 200,
         "extract_max_chars": 12000,
     },
+    "limits": {
+        "max_questions_per_interviewer": 8,
+        "max_candidate_qa_turns": 2,
+    },
 }
 
 
@@ -75,3 +79,7 @@ def get_feedback_config() -> Dict[str, Any]:
 
 def get_question_bank_config() -> Dict[str, Any]:
     return get_interview_config().get("question_bank", _DEFAULT_INTERVIEW["question_bank"])
+
+
+def get_interview_limits_config() -> Dict[str, Any]:
+    return get_interview_config().get("limits", _DEFAULT_INTERVIEW["limits"])

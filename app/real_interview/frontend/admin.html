@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Real Interview — Admin</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="admin-page">
+    <header class="site-header">
+      <h1>Real Interview Admin</h1>
+      <p class="tagline">Signups and usage metrics</p>
+    </header>
+
+    <main class="layout admin-layout">
+      <section id="view-admin-login" class="card" aria-labelledby="admin-login-heading">
+        <h2 id="admin-login-heading">Admin sign in</h2>
+        <p class="hint">Use an account whose email is listed in <code>ADMIN_EMAILS</code>.</p>
+        <form id="form-admin-login" class="stack" novalidate>
+          <label>
+            Email
+            <input type="email" name="email" autocomplete="email" required />
+          </label>
+          <label>
+            Password
+            <input type="password" name="password" autocomplete="current-password" required />
+          </label>
+          <button type="submit" class="btn primary">Log in</button>
+        </form>
+        <p class="auth-link-row">
+          <a href="/" class="btn link">Back to app</a>
+        </p>
+        <p id="admin-login-message" class="message" role="status" aria-live="polite"></p>
+      </section>
+
+      <section id="view-admin-denied" class="card is-hidden" hidden aria-labelledby="admin-denied-heading">
+        <h2 id="admin-denied-heading">Access denied</h2>
+        <p class="hint">Your account is not authorized for admin access.</p>
+        <p class="signed-in">Signed in as <code id="admin-denied-email"></code></p>
+        <p class="auth-link-row">
+          <button type="button" id="btn-admin-sign-out-denied" class="btn secondary">Sign out</button>
+          <a href="/" class="btn link">Back to app</a>
+        </p>
+      </section>
+
+      <section id="view-admin-dashboard" class="card is-hidden" hidden aria-labelledby="admin-dash-heading">
+        <div class="admin-toolbar">
+          <div>
+            <h2 id="admin-dash-heading">Dashboard</h2>
+            <p class="signed-in">
+              Signed in as <code id="admin-user-email"></code>
+            </p>
+          </div>
+          <div class="admin-toolbar-actions">
+            <label class="admin-period">
+              Period
+              <select id="admin-period-days">
+                <option value="7">Last 7 days</option>
+                <option value="30" selected>Last 30 days</option>
+                <option value="90">Last 90 days</option>
+              </select>
+            </label>
+            <button type="button" id="btn-admin-refresh" class="btn secondary">Refresh</button>
+            <button type="button" id="btn-admin-sign-out" class="btn link">Sign out</button>
+          </div>
+        </div>
+        <p id="admin-dash-message" class="message" role="status" aria-live="polite"></p>
+        <p id="admin-generated-at" class="hint admin-generated"></p>
+
+        <div id="admin-metrics" class="metrics-grid" aria-label="Usage metrics"></div>
+
+        <h3 class="admin-section-title">Recent signups</h3>
+        <div class="table-wrap">
+          <table class="data-table admin-table">
+            <thead>
+              <tr>
+                <th scope="col">Email</th>
+                <th scope="col">Signed up</th>
+                <th scope="col">User ID</th>
+              </tr>
+            </thead>
+            <tbody id="admin-signups-body"></tbody>
+          </table>
+        </div>
+
+        <h3 class="admin-section-title">Recent interviews</h3>
+        <div class="table-wrap">
+          <table class="data-table admin-table">
+            <thead>
+              <tr>
+                <th scope="col">Candidate</th>
+                <th scope="col">Role</th>
+                <th scope="col">Status</th>
+                <th scope="col">Messages</th>
+                <th scope="col">Started</th>
+              </tr>
+            </thead>
+            <tbody id="admin-interviews-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/admin.js" defer></script>
+  </body>
+</html>

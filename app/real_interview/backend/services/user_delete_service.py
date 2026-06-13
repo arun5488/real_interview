@@ -10,10 +10,10 @@ from app.real_interview.backend.services.pdfreader import resume_reader
 from app.real_interview.backend.services.user_maintenance import (
     _check_password,
     _error,
-    _get_client_and_collection,
+    _get_collection,
     _success,
 )
-from app.real_interview.backend.utils.mongodb import connect_mongodb
+from app.real_interview.backend.utils.mongodb import get_mongodb_database
 
 
 def _get_db_name() -> str:
@@ -52,7 +52,6 @@ def delete_user_account(email: str, password: str) -> Dict[str, Any]:
     related resumes (including GridFS), job_application, and interview records.
     """
     logger.info("[user_delete] delete_user_account start email=%s", email)
-    auth_client = None
     reader: resume_reader | None = None
 
     try:
@@ -65,7 +64,7 @@ def delete_user_account(email: str, password: str) -> Dict[str, Any]:
             logger.warning("[user_delete] missing password")
             return _error(423, "invalid email or password")
 
-        auth_client, auth_coll = _get_client_and_collection()
+        auth_coll = _get_collection()
         user_doc = find_user_by_email(auth_coll, email)
         if not user_doc:
             logger.warning("[user_delete] user not found email=%s", email)
@@ -93,7 +92,7 @@ def delete_user_account(email: str, password: str) -> Dict[str, Any]:
         for session_id in list_session_ids_for_candidate(str(user_oid)):
             delete_thread_checkpoints(session_id)
 
-        db = auth_client[_get_db_name()]
+        db = get_mongodb_database(_get_db_name())
         jobs_deleted = _delete_job_applications_for_customer(db, user_oid)
         interviews_deleted = _delete_interview_records_for_customer(db, user_oid)
 
@@ -133,5 +132,3 @@ def delete_user_account(email: str, password: str) -> Dict[str, Any]:
     finally:
         if reader is not None:
             reader.close()
-        if auth_client is not None:
-            auth_client.close()
