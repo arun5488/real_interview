@@ -557,6 +557,7 @@ def complete_interview(
             feedback.get("interview_decision"),
         )
 
+    record = interview_db.get_interview_by_session(session_id) or {}
     feedback_email_sent = False
     feedback_email_error = ""
     if feedback:

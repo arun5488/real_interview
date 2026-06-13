@@ -1204,7 +1204,7 @@
           session_id: sessionId,
           email_feedback_opt_in: emailOpt.checked,
         }).catch(function () {
-          /* non-blocking; complete request still sends explicit choice */
+          /* non-blocking */
         });
       });
     }

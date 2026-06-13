@@ -1,8 +1,6 @@
 # Real Interview
 
-An Agentic AI application simulates a real job interview for a given Resume/CV and a Job Application/description. The app analyzes the candidate's CV and sets up the interview Panel based on the experience of the candidate. Once the interview concludes, App analyzes the conversation and generates feedback for the recruiter for the POV of the panel.
-
-Users can use this app to practice before going for the actual interview.
+Flask application that guides a candidate from account setup through resume upload, job application, and an AI-driven mock interview. The web UI is served from the same server as the backend.
 
 **Live site:** [https://real-interview-lpd6.onrender.com/](https://real-interview-lpd6.onrender.com/)  
 **Admin dashboard:** [https://real-interview-lpd6.onrender.com/admin](https://real-interview-lpd6.onrender.com/admin)  
@@ -11,7 +9,7 @@ Users can use this app to practice before going for the actual interview.
 Local development: `http://localhost:5000` (app), `http://localhost:5000/admin` (admin), and `http://localhost:5000/feedback` (feedback).
 
 ## 🎯 Vision
-Build an Agentic AI application that simulates job interviews based on a candidate’s resume and job description.  
+Build an Agentic AI application that simulates mock interviews based on a candidate’s resume and job description.  
 Initial form: **chat-based app** → later extended with analytics, personalization, and enterprise features.
 
 ## Project layout
@@ -135,7 +133,7 @@ Copy from `.env_copy` and set these on your host (never commit real `.env`):
 | `FEEDBACK_TO_EMAIL` | Yes (feedback) | Inbox for `/feedback` submissions; defaults to first `ADMIN_EMAILS` if unset |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` | Yes (feedback) | Outbound mail (e.g. Gmail + [app password](https://support.google.com/accounts/answer/185833)) |
 | `SMTP_USE_TLS` | Optional | Default `true` (port `587`) |
-| `SEND_INTERVIEW_FEEDBACK_EMAIL` | Optional | Default `true` — allow emailing post-interview feedback when the candidate opts in |
+| `SEND_INTERVIEW_FEEDBACK_EMAIL` | Optional | Default `true` — email post-interview feedback when the candidate opts in |
 | `FEEDBACK_FROM_EMAIL` | Optional | Sender address; defaults to `SMTP_USER` |
 | `FEEDBACK_FROM_NAME` | Optional | Display name in the From header (default `Real Interview`) |
 | `COOKIE_SECURE` | Yes (HTTPS) | Set `true` on public HTTPS hosts |
@@ -359,7 +357,7 @@ All panelists are in the room from the start. After each answer, a **panel coord
 
 If you reply that you have **no questions** when invited, the interview ends immediately and post-interview feedback is generated. You can still click **End interview** early at any time.
 
-**Email feedback:** Before or during the interview, check **Email feedback to my account address** on the chat screen. When the session ends (manually or automatically), structured feedback is sent to the email you signed up with — requires SMTP configuration (same as the `/feedback` page) and `SEND_INTERVIEW_FEEDBACK_EMAIL=true`.
+**Email feedback:** On the interview chat screen, check **Email feedback to my account address**. When the session ends (manually or automatically), structured feedback is emailed to your signup address if SMTP is configured and `SEND_INTERVIEW_FEEDBACK_EMAIL=true`.
 
 ```
 [I1]: Hi Alex, I'm on the engineering panel. I've reviewed your background on the payments service —
