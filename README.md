@@ -33,7 +33,7 @@ app/real_interview/
 ├── frontend/                   # Static UI (index.html, admin.html, feedback.html, *.js)
 └── data/                       # Reserved data paths (config, transcripts, etc.)
 
-params.yaml                     # Interview summarizer/feedback thresholds (project root)
+params.yaml                     # Interview limits, summarizer/feedback thresholds (project root)
 ```
 
 ---
@@ -46,12 +46,13 @@ params.yaml                     # Interview summarizer/feedback thresholds (proj
 **Objective:** Deliver a secure, working chat-based mock interview app.
 
 ### Features
-- Resume upload (PDF, DOC, or DOCX).
+- Resume upload (PDF, DOC, or DOCX) with download of saved files from the user profile.
 - Job description input parsing.
-- Chat interview simulation.
-- Feedback summary (strengths, weaknesses, improvements).
+- Chat interview simulation with configurable questions-per-interviewer (app default + per-user override).
+- Post-interview report (structured feedback + PDF download).
+- User profile — interview stats, paused/completed history, resume management, interview settings.
 - Website feedback page — visitors email suggestions and bug reports to the site owner.
-- Admin dashboard for signups and usage metrics.
+- Admin dashboard for signups and usage metrics (active accounts only).
 
 
 **Do not commit `.env`** — it contains secrets. Use `.env_copy` or similar as a template without real keys.
@@ -194,11 +195,11 @@ Copy `MONGODB_URI` from your local `.env` exactly (no leading/trailing spaces).
 
 ### Post-deploy smoke test
 
-1. Sign up / log in (cookie auth should persist).
-2. Upload a resume and save a job application.
-3. Start interview — confirm HR summary and `[I1]` opening message.
+1. Sign up / log in — you should land on **Your profile** (cookie auth persists).
+2. On the profile, set **Interview settings** (optional) and upload a resume; confirm **Download saved resume** works.
+3. Click **Start interview** → upload/select resume → save job application → start chat; confirm HR summary and `[I1]` opening message.
 4. Pause and resume — summary should carry over.
-5. End interview — post-interview feedback saved; sign out clears the session.
+5. End interview — interview report appears with **Download PDF**; completed row on profile shows a download icon for the report.
 6. Open **Send feedback** (footer link or `/feedback`) — confirm the message arrives in your inbox.
 
 ### Open the UI
@@ -213,16 +214,58 @@ Use port **5000** unless you set `PORT` to something else in `.env`.
 
 ### Typical flow in the UI
 
-1. **Sign up** or **Log in**
-2. **Upload resume** (PDF, DOC, or DOCX) or **Fetch resume** to select an existing one
-3. **Continue to job application** — job link or pasted description, then save
-4. **Start interview** — HR summary and panel load; all panelists are present in a live session (`[I1]`, `[I2]`, …)
-5. **Pause interview** — conversation is summarized and saved; resume later with that context
-6. **Resume interview** — continue the same session
-7. **Answer in chat** — the panel picks follow-up questions from your replies (one or two interviewers may respond per turn)
-8. **End interview** when ready — post-interview feedback appears after completion
+1. **Sign up** or **Log in** — opens **Your profile**
+2. **Interview settings** (optional) — override how many questions each panel member may ask (minimum 4; app default from `params.yaml`)
+3. **Start interview** — upload or select a resume, then save a job application
+4. **Live panel chat** — all panelists present from the start (`[I1]`, `[I2]`, …); follow-ups based on your answers
+5. **Pause interview** — conversation is summarized and saved; resume later from profile or upload flow
+6. **Resume interview** — continue the same session (profile **Resume interview** picks the latest paused session)
+7. **End interview** when ready — structured **interview report** with PDF download; **Back to profile** returns to your dashboard
+8. **Profile** — view completed/paused counts, download past resumes and summary reports, upload new resumes
 9. **Send feedback** (footer link) — report bugs or ideas about the site itself
 10. **Sign out** clears the browser session
+
+---
+
+## User profile
+
+After login or signup, candidates land on **Your profile** (`/` → profile view when signed in).
+
+### What the profile shows
+
+| Area | Description |
+|------|-------------|
+| **Actions** | **Start interview** (upload/job flow), **Resume interview** (latest paused session) |
+| **Stats** | Clickable counts for completed and paused interviews |
+| **Interview tables** | Role, dates, status, message count; completed rows include a download icon for the PDF summary report |
+| **Interview settings** | Override `max_questions_per_interviewer` (stored in `authentications`; minimum **4**) |
+| **Resumes** | Upload PDF/DOC/DOCX; list saved files with **Download saved resume** |
+
+### Interview question limit (per candidate)
+
+| Source | Value |
+|--------|-------|
+| App default | `params.yaml` → `interview.limits.max_questions_per_interviewer` (default **8**) |
+| User override | Optional field `max_questions_per_interviewer` on the user document in **`authentications`** |
+| Minimum allowed | **4** (enforced on save) |
+| When it applies | New interviews snapshot the effective limit at start; in-progress sessions keep the limit from when they started |
+
+Use **Use app default** on the profile to clear a personal override.
+
+### Profile API (JWT required)
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/users/profile` | Email, interview counts, interview settings (`default`, `override`, `effective`, `minimum`) |
+| `GET /api/users/profile/interviews?status=completed\|paused` | Interview list for profile tables |
+| `PUT /api/users/profile/interview-settings` | Body: `{ "max_questions_per_interviewer": 6 }` or `{ "max_questions_per_interviewer": null }` to reset |
+| `GET /api/resumes` | List saved resumes (includes `downloadable` flag) |
+| `GET /api/resumes/<resume_id>/download` | Download original uploaded file (GridFS) |
+| `GET /api/interview/report?session_id=…` | Structured report JSON (completed sessions) |
+| `GET /api/interview/report/download?session_id=…` | PDF download of summary report |
+| `DELETE /api/users` | Delete account (email + password); removes auth, resumes, jobs, in-progress interviews; **completed** interviews retained in DB |
+
+---
 
 ## Admin dashboard
 
@@ -263,7 +306,7 @@ ADMIN_EMAILS=you@example.com,other@example.com
 **Tables:**
 
 - **Recent signups** — email, signup time, user ID
-- **Recent interviews** — candidate email, role, status, message count, start time
+- **Recent interviews** — candidate email, role, status, message count, start time (deleted accounts excluded)
 
 ### Admin API (JWT + admin email required)
 
@@ -292,7 +335,7 @@ The main app footer includes a **Send feedback** link. No account is required, b
 3. `POST /api/feedback` sends the submission to your mailbox via SMTP. Nothing is stored in MongoDB.
 4. Rate limit: **5 submissions per IP per hour** (MongoDB-backed, shared across workers).
 
-If SMTP is not configured, the page returns **503** and shows a friendly error.
+If SMTP is not configured (and Resend is not set when `EMAIL_PROVIDER=resend`), the page returns **503** and shows a friendly error.
 
 ### SMTP configuration
 
@@ -352,19 +395,23 @@ The example below is **illustrative** — actual questions and tone depend on yo
 
 All panelists are in the room from the start. After each answer, a **panel coordinator** picks who should follow up (often 1–2 interviewers per turn). Questions are grounded in what you just said — no manual handoff between interviewers.
 
-**Session limits** (configurable in `params.yaml` → `interview.limits`):
+**Session limits** (app defaults in `params.yaml` → `interview.limits`; candidates may override question count on their profile — see [User profile](#user-profile)):
 
 | Limit | Default | Behavior |
 |-------|---------|----------|
-| `max_questions_per_interviewer` | 8 | Each panel member (`I1`, `I2`, …) may ask up to 8 technical questions |
+| `max_questions_per_interviewer` | 8 | Each panel member (`I1`, `I2`, …) may ask up to this many technical questions. Profile override minimum **4**; stored on `authentications`. |
 | `max_candidate_qa_turns` | 2 | After all panelists reach their limit, the panel invites your questions; up to 2 Q&A rounds, then the session auto-ends |
 
-If you reply that you have **no questions** when invited, the interview ends immediately and post-interview feedback is generated. You can still click **End interview** early at any time.
+If you reply that you have **no questions** when invited, the interview ends immediately and the interview report is generated. You can still click **End interview** early at any time.
 
-Post-interview feedback is shown as an **interview report** when the session ends. Download it as a PDF from the interview screen or from **Completed interviews** on your profile.
+When the session ends, the **interview report** appears in the UI with a **Download PDF** button. From your profile, open **Interviews completed** and use the download icon in the **Report** column for past sessions.
 
-| `GET /api/interview/report?session_id=…` | JWT | Structured report JSON (completed sessions only) |
-| `GET /api/interview/report/download?session_id=…` | JWT | PDF download |
+**Report API** (JWT, completed sessions only):
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/interview/report?session_id=…` | Structured report JSON |
+| `GET /api/interview/report/download?session_id=…` | PDF download |
 
 ```
 [I1]: Hi Alex, I'm on the engineering panel. I've reviewed your background on the payments service —
@@ -423,10 +470,10 @@ After **End interview**, the feedback agent may produce structured output like:
 }
 ```
 
-This feedback appears in the UI as an **interview report** with a **Download PDF** button; the full message history and summaries remain in MongoDB for that session.
+This feedback appears in the UI as an **interview report** with a **Download PDF** button; download past reports from **Your profile** → **Interviews completed**. Full message history and summaries remain in MongoDB for that session.
 
 ---
 
 ## Dependencies
 
-See `requirements.txt`: Flask, PyMongo, bcrypt, pypdf, python-docx, legacy-doc, python-dotenv, PyYAML, langchain-openai, langgraph, langchain-core, tavily-python.
+See `requirements.txt`: Flask, PyMongo, bcrypt, pypdf, python-docx, legacy-doc, python-dotenv, PyYAML, langchain-openai, langgraph, langchain-core, tavily-python, fpdf2 (interview report PDFs).
