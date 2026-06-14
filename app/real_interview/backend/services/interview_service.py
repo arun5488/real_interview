@@ -1,10 +1,8 @@
-import os
 from typing import Any, Dict, List
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from app.real_interview import logger
-from app.real_interview.backend.auth.email_utils import find_user_by_id, normalize_email
 from app.real_interview.backend.graphs.interview_graph import (
     get_advance_graph,
     get_chat_graph,
@@ -13,81 +11,6 @@ from app.real_interview.backend.graphs.interview_graph import (
     make_thread_id,
 )
 from app.real_interview.backend.services import interview_record as interview_db
-from app.real_interview.backend.services.email_service import (
-    interview_feedback_email_enabled,
-    is_smtp_available,
-    send_interview_feedback_email,
-)
-from app.real_interview.backend.utils.mongodb import get_mongodb_database
-
-
-def _users_collection_name() -> str:
-    return os.getenv("MONGODB_COLLECTION_USERS", "authentications").strip()
-
-
-def _candidate_email_for_record(record: Dict[str, Any]) -> str:
-    candidate_id = record.get("candidate_id")
-    if not candidate_id:
-        return ""
-    users = get_mongodb_database()[_users_collection_name()]
-    user_doc = find_user_by_id(users, str(candidate_id))
-    if not user_doc:
-        return ""
-    return normalize_email(str(user_doc.get("email") or ""))
-
-
-def _should_email_feedback(
-    record: Dict[str, Any],
-    *,
-    email_feedback: bool | None,
-) -> bool:
-    if not interview_feedback_email_enabled() or not is_smtp_available():
-        return False
-    if record.get("feedback_email_sent"):
-        return False
-    if email_feedback is not None:
-        return bool(email_feedback)
-    return bool(record.get("email_feedback_opt_in"))
-
-
-def _maybe_send_feedback_email(
-    *,
-    session_id: str,
-    record: Dict[str, Any],
-    feedback: Dict[str, Any],
-    email_feedback: bool | None,
-) -> tuple[bool, str]:
-    if not _should_email_feedback(record, email_feedback=email_feedback):
-        return False, ""
-    candidate_email = _candidate_email_for_record(record)
-    ok, err = send_interview_feedback_email(
-        candidate_email=candidate_email,
-        feedback=feedback,
-        role_applied_for=record.get("role_applied_for") or "",
-        session_id=session_id,
-    )
-    if ok:
-        interview_db.mark_feedback_email_sent(session_id)
-    return ok, err
-
-
-def set_interview_preferences(
-    *,
-    session_id: str,
-    email_feedback_opt_in: bool,
-) -> Dict[str, Any]:
-    record = interview_db.get_interview_by_session(session_id)
-    if not record:
-        return {"status_code": 404, "error": "interview session not found", "session_id": session_id}
-    interview_db.set_email_feedback_opt_in(session_id, email_feedback_opt_in)
-    record = interview_db.get_interview_by_session(session_id) or {}
-    state = _get_merged_state(session_id)
-    return {
-        "status_code": 200,
-        "session_id": session_id,
-        "email_feedback_opt_in": bool(email_feedback_opt_in),
-        "state": _public_state(state, record) if state else _public_state({"session_id": session_id}, record),
-    }
 
 
 def _config(thread_id: str) -> Dict[str, Any]:
@@ -149,9 +72,8 @@ def _public_state(state: Dict[str, Any], record: Dict[str, Any] | None = None) -
         "interview_phase": state.get("interview_phase") or "active",
         "candidate_qa_turns": int(state.get("candidate_qa_turns") or 0),
         "interviewer_question_counts": state.get("interviewer_question_counts") or {},
-        "email_feedback_opt_in": bool(record.get("email_feedback_opt_in")) if record else False,
-        "feedback_email_sent": bool(record.get("feedback_email_sent")) if record else False,
         "candidate_post_interview_feedback": feedback,
+        "report_available": bool(feedback),
         "interview_complete": state.get("interview_complete"),
         "step": state.get("step"),
         "error": state.get("error"),
@@ -159,11 +81,38 @@ def _public_state(state: Dict[str, Any], record: Dict[str, Any] | None = None) -
     }
 
 
+def _ensure_question_limit_in_checkpoint(session_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
+    """Backfill question limit for sessions started before user preferences existed."""
+    if state.get("max_questions_per_interviewer") is not None:
+        return state
+
+    customer_id = (state.get("customer_id") or "").strip()
+    if not customer_id and session_id:
+        parts = session_id.split(":", 2)
+        if len(parts) == 3:
+            customer_id = parts[0]
+
+    if not customer_id:
+        return state
+
+    from app.real_interview.backend.services.user_interview_preferences import (
+        resolve_max_questions_per_interviewer_for_user,
+    )
+
+    limit = resolve_max_questions_per_interviewer_for_user(customer_id)
+    patch = {"max_questions_per_interviewer": limit, "customer_id": customer_id}
+    _patch_checkpoint(session_id, patch)
+    merged = dict(state)
+    merged.update(patch)
+    return merged
+
+
 def _get_merged_state(thread_id: str) -> Dict[str, Any]:
     graph = get_start_graph()
     snapshot = graph.get_state(_config(thread_id))
     if snapshot and snapshot.values:
-        return dict(snapshot.values)
+        state = dict(snapshot.values)
+        return _ensure_question_limit_in_checkpoint(thread_id, state)
     return {}
 
 
@@ -211,6 +160,13 @@ def _restore_checkpoint_if_missing(session_id: str) -> None:
             logger.warning("[interview_service] restore HR failed session_id=%s", session_id)
             return
         base.update(router_node(base))
+        from app.real_interview.backend.services.user_interview_preferences import (
+            resolve_max_questions_per_interviewer_for_user,
+        )
+
+        base["max_questions_per_interviewer"] = resolve_max_questions_per_interviewer_for_user(
+            customer_id
+        )
         _patch_checkpoint(session_id, base)
         logger.info("[interview_service] restored checkpoint from Mongo session_id=%s", session_id)
     except Exception:
@@ -516,7 +472,6 @@ def complete_interview(
     *,
     session_id: str,
     thread_id: str | None = None,
-    email_feedback: bool | None = None,
 ) -> Dict[str, Any]:
     if thread_id and not session_id:
         session_id = thread_id
@@ -558,33 +513,51 @@ def complete_interview(
         )
 
     record = interview_db.get_interview_by_session(session_id) or {}
-    feedback_email_sent = False
-    feedback_email_error = ""
-    if feedback:
-        sent, err = _maybe_send_feedback_email(
-            session_id=session_id,
-            record=record,
-            feedback=feedback,
-            email_feedback=email_feedback,
-        )
-        feedback_email_sent = sent
-        feedback_email_error = err
-        if sent:
-            record = interview_db.get_interview_by_session(session_id) or {}
-
-    message = "Interview feedback generated."
-    if feedback_email_sent:
-        message = "Interview feedback generated and emailed to your account address."
-    elif feedback and _should_email_feedback(record, email_feedback=email_feedback) and feedback_email_error:
-        message = "Interview feedback generated, but the email could not be sent."
 
     return {
         "status_code": 200,
         "session_id": session_id,
         "state": _public_state(state, record),
-        "message": message,
-        "feedback_email_sent": feedback_email_sent,
+        "message": "Interview complete. Your report is ready to download.",
+        "report_available": bool(feedback),
     }
+
+
+def get_interview_report(*, session_id: str, customer_id: str) -> Dict[str, Any]:
+    """Return structured report payload for a completed interview."""
+    from app.real_interview.backend.services.interview_report_service import build_report_payload
+
+    record = interview_db.get_interview_by_session(session_id)
+    if not record:
+        return {"status_code": 404, "error": "interview session not found", "session_id": session_id}
+    if str(record.get("candidate_id", "")) != str(customer_id):
+        return {"status_code": 403, "error": "access denied", "session_id": session_id}
+    if not record.get("interview_feedback"):
+        return {
+            "status_code": 404,
+            "error": "report is available after the interview is completed",
+            "session_id": session_id,
+        }
+    return {
+        "status_code": 200,
+        "session_id": session_id,
+        "report": build_report_payload(record),
+    }
+
+
+def build_interview_report_pdf(*, session_id: str, customer_id: str) -> tuple[int, Dict[str, Any], bytes | None]:
+    """Build PDF bytes for a completed interview report."""
+    from app.real_interview.backend.services.interview_report_service import (
+        build_report_pdf,
+        report_download_filename,
+    )
+
+    result = get_interview_report(session_id=session_id, customer_id=customer_id)
+    code = int(result.get("status_code", 200))
+    if code != 200:
+        return code, result, None
+    payload = result["report"]
+    return 200, {"filename": report_download_filename(payload), "session_id": session_id}, build_report_pdf(payload)
 
 
 def pause_interview(*, session_id: str, thread_id: str | None = None) -> Dict[str, Any]:

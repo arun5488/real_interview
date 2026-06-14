@@ -17,6 +17,10 @@ from app.real_interview.backend.services.user_maintenance import (
     login_user,
     sign_up_user,
 )
+from app.real_interview.backend.services.user_profile_service import get_user_profile, list_profile_interviews
+from app.real_interview.backend.services.user_interview_preferences import (
+    update_max_questions_per_interviewer_preference,
+)
 
 user_maintenance_blueprint = Blueprint("user_maintenance", __name__, url_prefix="/api")
 
@@ -60,6 +64,63 @@ def current_user_route():
             "email": g.current_user_email,
         }
     ), 200
+
+
+@user_maintenance_blueprint.route("/users/profile", methods=["GET"])
+@require_auth
+def user_profile_route():
+    logger.info("[user_maintenance][GET /api/users/profile] user_id=%s", g.current_user_id)
+    result = get_user_profile(customer_id=g.current_user_id, email=g.current_user_email)
+    status_code = int(result.pop("status_code", 200))
+    return jsonify(result), status_code
+
+
+@user_maintenance_blueprint.route("/users/profile/interviews", methods=["GET"])
+@require_auth
+def user_profile_interviews_route():
+    kind = (request.args.get("status") or request.args.get("kind") or "").strip().lower()
+    if kind not in ("completed", "paused"):
+        return jsonify({"error": "status must be completed or paused"}), 400
+    logger.info(
+        "[user_maintenance][GET /api/users/profile/interviews] user_id=%s status=%s",
+        g.current_user_id,
+        kind,
+    )
+    try:
+        result = list_profile_interviews(customer_id=g.current_user_id, kind=kind)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    status_code = int(result.pop("status_code", 200))
+    return jsonify(result), status_code
+
+
+@user_maintenance_blueprint.route("/users/profile/interview-settings", methods=["PUT"])
+@require_auth
+def user_profile_interview_settings_route():
+    logger.info(
+        "[user_maintenance][PUT /api/users/profile/interview-settings] user_id=%s",
+        g.current_user_id,
+    )
+    body = _parse_json_body()
+    if body is None:
+        return jsonify({"error": "invalid JSON body"}), 400
+
+    if "max_questions_per_interviewer" not in body:
+        return jsonify({"error": "max_questions_per_interviewer is required"}), 400
+
+    raw = body.get("max_questions_per_interviewer")
+    value: int | None
+    if raw is None:
+        value = None
+    else:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": "max_questions_per_interviewer must be an integer or null"}), 400
+
+    result = update_max_questions_per_interviewer_preference(g.current_user_id, value)
+    status_code = int(result.pop("status_code", 200))
+    return jsonify(result), status_code
 
 
 @user_maintenance_blueprint.route("/users/logout", methods=["POST"])
@@ -198,7 +259,7 @@ def change_password_route():
 
 
 @user_maintenance_blueprint.route("/users", methods=["DELETE"])
-@require_auth
+@rate_limit(scope="delete_account_ip", max_attempts=5, window_seconds=3600, key=client_ip)
 def delete_user_route():
     logger.info("[user_maintenance][DELETE /api/users] start")
     body = _parse_json_body()
@@ -206,13 +267,29 @@ def delete_user_route():
         logger.warning("[user_maintenance][DELETE /api/users] invalid JSON body")
         return jsonify({"error": "invalid JSON body"}), 400
 
-    email = g.current_user_email
+    email = body.get("email") or body.get("emailid")
     password = body.get("password")
 
-    ok, missing = _require_str({"password": password}, "password")
+    ok, missing = _require_str({"email": email, "password": password}, "email", "password")
     if not ok:
         logger.warning("[user_maintenance][DELETE /api/users] missing/invalid fields: %s", missing)
         return jsonify({"error": "missing required fields"}), 400
+
+    from app.real_interview.backend.auth.rate_limit import enforce_rate_limit
+
+    email_key = normalize_email(email if isinstance(email, str) else "")
+    if email_key:
+        allowed, retry_after = enforce_rate_limit(
+            scope="delete_account_email",
+            key=email_key,
+            max_attempts=5,
+            window_seconds=900,
+        )
+        if not allowed:
+            return (
+                jsonify({"error": "too many requests", "retry_after_seconds": retry_after}),
+                429,
+            )
 
     logger.info("[user_maintenance][DELETE /api/users] invoking service")
     result = delete_user(  # type: ignore[arg-type]

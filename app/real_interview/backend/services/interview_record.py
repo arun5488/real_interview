@@ -97,8 +97,6 @@ def create_interview_record(
         "paused_at": None,
         "interview_summary": "",
         "interview_feedback": None,
-        "email_feedback_opt_in": False,
-        "feedback_email_sent": False,
         "messages": [],
         "last_summarized_message_count": 0,
     }
@@ -119,6 +117,53 @@ def list_session_ids_for_candidate(candidate_id: str) -> List[str]:
     return [doc["session_id"] for doc in cursor if doc.get("session_id")]
 
 
+def _incomplete_interviews_query(candidate_oid: ObjectId) -> Dict[str, Any]:
+    """Active/paused interviews without post-interview feedback (safe to remove on account delete)."""
+    return {
+        "candidate_id": candidate_oid,
+        "$nor": [
+            {"interview_status": "completed"},
+            {"interview_feedback": {"$exists": True, "$ne": None}},
+        ],
+    }
+
+
+def list_incomplete_session_ids_for_candidate(candidate_id: str) -> List[str]:
+    """Session ids for in-progress or paused interviews (not completed)."""
+    candidate_oid = _as_object_id(candidate_id, "candidate_id")
+    collection = _get_collection()
+    cursor = collection.find(_incomplete_interviews_query(candidate_oid), {"session_id": 1})
+    return [doc["session_id"] for doc in cursor if doc.get("session_id")]
+
+
+def delete_incomplete_interviews_for_candidate(candidate_id: str) -> tuple[int, int]:
+    """
+    Remove only active/paused interviews. Completed sessions are retained with candidate_id.
+
+    Returns (deleted_count, retained_count).
+    """
+    candidate_oid = _as_object_id(candidate_id, "candidate_id")
+    collection = _get_collection()
+    retained = collection.count_documents(
+        {
+            "candidate_id": candidate_oid,
+            "$or": [
+                {"interview_status": "completed"},
+                {"interview_feedback": {"$exists": True, "$ne": None}},
+            ],
+        }
+    )
+    result = collection.delete_many(_incomplete_interviews_query(candidate_oid))
+    deleted = int(result.deleted_count)
+    logger.info(
+        "[interview_record] delete_incomplete candidate_id=%s deleted=%s retained=%s",
+        candidate_oid,
+        deleted,
+        retained,
+    )
+    return deleted, retained
+
+
 def _serialize_session_summary(doc: Dict[str, Any]) -> Dict[str, Any]:
     interview_date = doc.get("interview_date")
     paused_at = doc.get("paused_at")
@@ -130,7 +175,68 @@ def _serialize_session_summary(doc: Dict[str, Any]) -> Dict[str, Any]:
         "interview_status": doc.get("interview_status") or "active",
         "interview_date": interview_date.isoformat() if hasattr(interview_date, "isoformat") else interview_date,
         "paused_at": paused_at.isoformat() if hasattr(paused_at, "isoformat") else paused_at,
+        "message_count": len(doc.get("messages") or []),
     }
+
+
+def _completed_interviews_query(candidate_oid: ObjectId) -> Dict[str, Any]:
+    return {
+        "candidate_id": candidate_oid,
+        "$or": [
+            {"interview_status": "completed"},
+            {"interview_feedback": {"$exists": True, "$ne": None}},
+        ],
+    }
+
+
+def _paused_interviews_query(candidate_oid: ObjectId) -> Dict[str, Any]:
+    return {
+        "candidate_id": candidate_oid,
+        "interview_status": "paused",
+        "$or": [
+            {"interview_feedback": None},
+            {"interview_feedback": {"$exists": False}},
+        ],
+    }
+
+
+_INTERVIEW_LIST_PROJECTION = {
+    "session_id": 1,
+    "resume_id": 1,
+    "job_application_id": 1,
+    "role_applied_for": 1,
+    "interview_status": 1,
+    "interview_date": 1,
+    "paused_at": 1,
+    "messages": 1,
+}
+
+
+def count_interviews_for_candidate(candidate_id: str) -> Dict[str, int]:
+    candidate_oid = _as_object_id(candidate_id, "candidate_id")
+    collection = _get_collection()
+    return {
+        "completed": collection.count_documents(_completed_interviews_query(candidate_oid)),
+        "paused": collection.count_documents(_paused_interviews_query(candidate_oid)),
+    }
+
+
+def list_interviews_for_candidate_by_kind(candidate_id: str, kind: str) -> List[Dict[str, Any]]:
+    """List completed or paused interviews for the profile screen."""
+    normalized = (kind or "").strip().lower()
+    candidate_oid = _as_object_id(candidate_id, "candidate_id")
+    collection = _get_collection()
+    if normalized == "completed":
+        query = _completed_interviews_query(candidate_oid)
+        sort_keys = [("interview_date", -1)]
+    elif normalized == "paused":
+        query = _paused_interviews_query(candidate_oid)
+        sort_keys = [("paused_at", -1), ("interview_date", -1)]
+    else:
+        raise ValueError("kind must be completed or paused")
+
+    cursor = collection.find(query, _INTERVIEW_LIST_PROJECTION).sort(sort_keys)
+    return [_serialize_session_summary(doc) for doc in cursor if doc.get("session_id")]
 
 
 def list_open_interviews_for_candidate(candidate_id: str) -> List[Dict[str, Any]]:
@@ -250,22 +356,6 @@ def save_interview_feedback(session_id: str, feedback: Dict[str, Any]) -> None:
     )
 
 
-def set_email_feedback_opt_in(session_id: str, opt_in: bool) -> None:
-    collection = _get_collection()
-    collection.update_one(
-        {"session_id": session_id},
-        {"$set": {"email_feedback_opt_in": bool(opt_in)}},
-    )
-
-
-def mark_feedback_email_sent(session_id: str) -> None:
-    collection = _get_collection()
-    collection.update_one(
-        {"session_id": session_id},
-        {"$set": {"feedback_email_sent": True}},
-    )
-
-
 def _serialize_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
     interview_date = doc.get("interview_date")
     paused_at = doc.get("paused_at")
@@ -281,8 +371,6 @@ def _serialize_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
         "paused_at": paused_at.isoformat() if hasattr(paused_at, "isoformat") else paused_at,
         "interview_summary": doc.get("interview_summary") or "",
         "interview_feedback": doc.get("interview_feedback"),
-        "email_feedback_opt_in": bool(doc.get("email_feedback_opt_in")),
-        "feedback_email_sent": bool(doc.get("feedback_email_sent")),
         "messages": [
             {
                 "role": m.get("role"),

@@ -276,10 +276,67 @@ def delete_user(email: str, password: str) -> Dict[str, Any]:
     """
     DELETE: remove user from authentications and cascade-delete related data.
 
-    Delegates to user_delete_service (resumes, job_application, interview).
+    Delegates to user_delete_service (resumes, job_application; completed interviews retained).
     """
     from app.real_interview.backend.services.user_delete_service import delete_user_account
 
     logger.info("[user_maintenance][DELETE] delete_user delegating to user_delete_service")
     return delete_user_account(email=email, password=password)
+
+
+def get_user_max_questions_override(user_id: str) -> int | None:
+    """Return the user's stored override, or None when using the app default."""
+    from app.real_interview.backend.auth.email_utils import find_user_by_id
+
+    doc = find_user_by_id(_get_collection(), user_id)
+    if not doc:
+        return None
+    raw = doc.get("max_questions_per_interviewer")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def set_user_max_questions_override(user_id: str, value: int | None) -> Dict[str, Any]:
+    """
+    Store or clear max_questions_per_interviewer on the authentications document.
+
+    value=None removes the override (app default from params.yaml applies).
+    """
+    from app.real_interview.backend.auth.email_utils import find_user_by_id
+    from app.real_interview.backend.services.interview_closing import MIN_MAX_QUESTIONS_PER_INTERVIEWER
+
+    doc = find_user_by_id(_get_collection(), user_id)
+    if not doc:
+        return _error(404, "user not found")
+
+    if value is None:
+        _get_collection().update_one({"_id": doc["_id"]}, {"$unset": {"max_questions_per_interviewer": ""}})
+        logger.info("[user_maintenance] cleared max_questions_per_interviewer user_id=%s", user_id)
+        return _success(200, {"message": "interview setting reset to default"})
+
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return _error(400, f"max_questions_per_interviewer must be an integer >= {MIN_MAX_QUESTIONS_PER_INTERVIEWER}")
+
+    if parsed < MIN_MAX_QUESTIONS_PER_INTERVIEWER:
+        return _error(
+            400,
+            f"max_questions_per_interviewer must be at least {MIN_MAX_QUESTIONS_PER_INTERVIEWER}",
+        )
+
+    _get_collection().update_one(
+        {"_id": doc["_id"]},
+        {"$set": {"max_questions_per_interviewer": parsed}},
+    )
+    logger.info(
+        "[user_maintenance] set max_questions_per_interviewer=%s user_id=%s",
+        parsed,
+        user_id,
+    )
+    return _success(200, {"message": "interview setting saved", "max_questions_per_interviewer": parsed})
 

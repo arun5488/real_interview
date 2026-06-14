@@ -14,3 +14,4 @@ python-docx>=1.1.0
 legacy-doc>=0.2.1
 PyJWT>=2.8.0
 gunicorn>=22.0.0
+fpdf2>=2.8.0

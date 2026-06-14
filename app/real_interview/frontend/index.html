@@ -9,7 +9,7 @@
   <body>
     <header class="site-header">
       <h1>Real Interview</h1>
-      <p class="tagline">Sign up, upload your resume, then add the job you are applying for.</p>
+      <p class="tagline">Sign up, manage your profile, upload your resume, then practice mock interviews.</p>
     </header>
 
     <main class="layout">
@@ -92,8 +92,9 @@
 
         <div id="panel-delete-account" class="tab-panel is-hidden" role="tabpanel" hidden>
           <p class="hint danger-hint">
-            Permanently deletes your account and all related data: resumes, job applications, and
-            interview records. This cannot be undone.
+            Permanently deletes your account, resumes, job applications, and any in-progress
+            interviews. Completed interview records are kept anonymously (by candidate id) for
+            site analytics. This cannot be undone.
           </p>
           <form id="form-delete-account" class="stack" novalidate>
             <label>
@@ -118,10 +119,115 @@
         <p id="auth-message" class="message" role="status" aria-live="polite"></p>
       </section>
 
+      <section id="view-profile" class="card is-hidden" aria-labelledby="profile-heading" hidden>
+        <h2 id="profile-heading">Your profile</h2>
+        <p class="signed-in">
+          Signed in as <code id="display-user-email-profile"></code>
+          <button type="button" id="btn-sign-out-profile" class="btn link">Sign out</button>
+        </p>
+
+        <div class="profile-actions">
+          <button type="button" id="btn-profile-start-interview" class="btn primary">Start interview</button>
+          <button type="button" id="btn-profile-resume-interview" class="btn secondary">Resume interview</button>
+        </div>
+
+        <div class="profile-stats" aria-label="Interview statistics">
+          <button type="button" id="link-profile-completed" class="profile-stat-link">
+            <span class="profile-stat-value" id="profile-count-completed">0</span>
+            <span class="profile-stat-label">Interviews completed</span>
+          </button>
+          <button type="button" id="link-profile-paused" class="profile-stat-link">
+            <span class="profile-stat-value" id="profile-count-paused">0</span>
+            <span class="profile-stat-label">Interviews paused</span>
+          </button>
+        </div>
+
+        <div class="profile-interview-settings">
+          <h3>Interview settings</h3>
+          <p class="hint">
+            Max technical questions each panel member may ask. App default:
+            <strong id="profile-max-questions-default">8</strong> (minimum 4).
+          </p>
+          <form id="form-profile-interview-settings" class="stack profile-settings-form" novalidate>
+            <label for="profile-max-questions-input">
+              Your preference
+              <input
+                type="number"
+                id="profile-max-questions-input"
+                name="max_questions_per_interviewer"
+                min="4"
+                step="1"
+                inputmode="numeric"
+              />
+            </label>
+            <p id="profile-max-questions-effective" class="hint profile-max-questions-effective"></p>
+            <div class="profile-settings-actions">
+              <button type="submit" class="btn primary">Save preference</button>
+              <button type="button" id="btn-profile-max-questions-reset" class="btn secondary">
+                Use app default
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div id="profile-interviews-wrap" class="profile-interviews-wrap is-hidden" hidden>
+          <h3 id="profile-interviews-heading">Interviews</h3>
+          <table id="profile-interviews-table" class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Role</th>
+                <th scope="col">Started</th>
+                <th scope="col">Paused</th>
+                <th scope="col">Status</th>
+                <th scope="col">Messages</th>
+                <th scope="col" id="profile-interviews-report-col" class="profile-interviews-report-col" title="Summary report">
+                  Report
+                </th>
+              </tr>
+            </thead>
+            <tbody id="profile-interviews-body"></tbody>
+          </table>
+        </div>
+
+        <div class="profile-resumes">
+          <h3>Resumes</h3>
+          <p class="hint">Upload a new resume or download a previously saved file.</p>
+          <form id="form-profile-upload" class="stack" enctype="multipart/form-data" novalidate>
+            <label>
+              Resume file
+              <input
+                type="file"
+                name="resume"
+                accept="application/pdf,.pdf,application/msword,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx"
+              />
+            </label>
+            <button type="submit" class="btn primary">Upload resume</button>
+          </form>
+          <div id="profile-resume-list-wrap" class="resume-list-wrap is-hidden" hidden aria-live="polite">
+            <table id="profile-resume-table" class="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Date</th>
+                  <th scope="col">Resume</th>
+                  <th scope="col">Saved file</th>
+                </tr>
+              </thead>
+              <tbody id="profile-resume-table-body"></tbody>
+            </table>
+            <p id="profile-resume-empty" class="hint profile-resume-empty is-hidden" hidden>
+              No saved resumes yet. Upload one above.
+            </p>
+          </div>
+        </div>
+
+        <p id="profile-message" class="message" role="status" aria-live="polite"></p>
+      </section>
+
       <section id="view-upload" class="card is-hidden" aria-labelledby="upload-heading" hidden>
         <h2 id="upload-heading">Upload resume</h2>
         <p class="signed-in">
           Signed in as <code id="display-user-email"></code>
+          <button type="button" id="btn-back-profile-upload" class="btn link">Back to profile</button>
           <button type="button" id="btn-sign-out" class="btn link">Sign out</button>
         </p>
         <div id="paused-interview-banner-upload" class="paused-interview-banner is-hidden" hidden role="status">
@@ -173,6 +279,7 @@
         <h2 id="job-heading">Job application</h2>
         <p class="signed-in">
           Signed in as <code id="display-user-email-job"></code>
+          <button type="button" id="btn-back-profile-job" class="btn link">Back to profile</button>
           <button type="button" id="btn-sign-out-job" class="btn link">Sign out</button>
         </p>
         <div id="paused-interview-banner-job" class="paused-interview-banner is-hidden" hidden role="status">
@@ -246,6 +353,7 @@
         <p class="signed-in">
           Signed in as <code id="display-user-email-chat"></code>
           <span class="session-label">Session <code id="display-session-id"></code></span>
+          <button type="button" id="btn-back-profile-chat" class="btn link">Back to profile</button>
           <button type="button" id="btn-sign-out-chat" class="btn link">Sign out</button>
         </p>
         <details id="interview-context-details" class="interview-context">
@@ -279,8 +387,16 @@
         </div>
         <p id="chat-message" class="message" role="status" aria-live="polite"></p>
         <div id="interview-feedback-wrap" class="interview-feedback-wrap is-hidden" hidden>
-          <h3>Post-interview feedback</h3>
-          <pre id="interview-feedback" class="result"></pre>
+          <h3>Interview report</h3>
+          <article id="interview-report" class="interview-report" aria-live="polite"></article>
+          <div class="interview-report-actions">
+            <button type="button" id="btn-download-interview-report" class="btn secondary is-hidden" hidden>
+              Download PDF
+            </button>
+            <button type="button" id="btn-back-profile-after-interview" class="btn primary is-hidden" hidden>
+              Back to profile
+            </button>
+          </div>
         </div>
       </section>
     </main>

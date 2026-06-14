@@ -4,9 +4,27 @@ import re
 
 from app.real_interview.backend.config.configuration import get_interview_limits_config
 
+MIN_MAX_QUESTIONS_PER_INTERVIEWER = 4
+
+
+def default_max_questions_per_interviewer() -> int:
+    return int(get_interview_limits_config().get("max_questions_per_interviewer", 8))
+
 
 def max_questions_per_interviewer() -> int:
-    return int(get_interview_limits_config().get("max_questions_per_interviewer", 8))
+    """App default from params.yaml (no user override)."""
+    return default_max_questions_per_interviewer()
+
+
+def question_limit_from_state(state: dict | None) -> int:
+    if isinstance(state, dict):
+        raw = state.get("max_questions_per_interviewer")
+        if raw is not None:
+            try:
+                return int(raw)
+            except (TypeError, ValueError):
+                pass
+    return default_max_questions_per_interviewer()
 
 
 def max_candidate_qa_turns() -> int:
@@ -33,12 +51,14 @@ def _normalize_counts(raw: dict | list | None, panel_size: int) -> dict[int, int
 def all_panelists_at_question_limit(
     counts: dict[int, int] | dict | list | None,
     panel_size: int,
+    *,
+    limit: int | None = None,
 ) -> bool:
     if panel_size <= 0:
         return False
     normalized = _normalize_counts(counts, panel_size)
-    limit = max_questions_per_interviewer()
-    return all(normalized.get(i, 0) >= limit for i in range(panel_size))
+    effective_limit = limit if limit is not None else default_max_questions_per_interviewer()
+    return all(normalized.get(i, 0) >= effective_limit for i in range(panel_size))
 
 
 def increment_interviewer_question_count(

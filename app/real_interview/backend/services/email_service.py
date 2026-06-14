@@ -32,12 +32,28 @@ def _smtp_settings() -> Tuple[str, int, str, str, bool, str, str] | None:
     return host, port, user, password, use_tls, from_email, from_name
 
 
+def _normalize_secret(value: str) -> str:
+    """Strip whitespace and optional surrounding quotes from env values."""
+    v = value.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+        v = v[1:-1].strip()
+    return v
+
+
 def _resend_settings() -> Tuple[str, str, str] | None:
-    api_key = os.getenv("RESEND_API_KEY", "").strip()
-    from_email = os.getenv("RESEND_FROM_EMAIL", "").strip() or os.getenv("FEEDBACK_FROM_EMAIL", "").strip()
+    api_key = _normalize_secret(os.getenv("RESEND_API_KEY", ""))
+    from_email = _normalize_secret(
+        os.getenv("RESEND_FROM_EMAIL", "") or os.getenv("FEEDBACK_FROM_EMAIL", "")
+    )
     from_name = os.getenv("FEEDBACK_FROM_NAME", "Real Interview").strip()
     if not api_key or not from_email:
         return None
+    if not api_key.startswith("re_"):
+        logger.warning(
+            "[email_service] RESEND_API_KEY does not look like a Resend key "
+            "(expected prefix re_). Create the key at https://resend.com/api-keys — "
+            "not in Render Account Settings → API Keys."
+        )
     return api_key, from_email, from_name
 
 
@@ -59,6 +75,11 @@ def _parse_resend_error(detail: str, status: int) -> str:
         payload = json.loads(detail)
         message = (payload.get("message") or payload.get("error") or "").strip()
         if message:
+            if status == 401 and "invalid" in message.lower():
+                return (
+                    "Resend API key is invalid — create RESEND_API_KEY at "
+                    "https://resend.com/api-keys (starts with re_), not Render's API keys"
+                )
             return message
     except json.JSONDecodeError:
         pass
@@ -74,12 +95,6 @@ def is_smtp_available() -> bool:
     if email_provider() == "resend":
         return _resend_settings() is not None
     return _smtp_settings() is not None
-
-
-def interview_feedback_email_enabled() -> bool:
-    """Master switch for emailing post-interview feedback to candidates."""
-    raw = os.getenv("SEND_INTERVIEW_FEEDBACK_EMAIL", "true").strip().lower()
-    return raw not in ("0", "false", "no")
 
 
 def feedback_recipient() -> str:
@@ -188,95 +203,6 @@ def _send_email(*, to_email: str, subject: str, body: str, reply_to: str = "") -
     if email_provider() == "resend":
         return _send_via_resend(to_email=to_email, subject=subject, body=body, reply_to=reply_to)
     return _send_via_smtp(to_email=to_email, subject=subject, body=body, reply_to=reply_to)
-
-
-def _format_interview_feedback_body(
-    *,
-    feedback: Dict[str, Any],
-    role_applied_for: str = "",
-    session_id: str = "",
-) -> str:
-    lines = ["Your Real Interview feedback", ""]
-    if role_applied_for:
-        lines.append(f"Role: {role_applied_for}")
-    if session_id:
-        lines.append(f"Session: {session_id}")
-    lines.append("")
-
-    assessment = (feedback.get("overall_assessment") or "").strip()
-    if assessment:
-        lines.extend(["Overall assessment", assessment, ""])
-
-    strengths = feedback.get("strengths") or []
-    if strengths:
-        lines.append("Strengths")
-        for item in strengths:
-            text = (item or "").strip()
-            if text:
-                lines.append(f"  • {text}")
-        lines.append("")
-
-    improvements = feedback.get("areas_to_improve") or []
-    if improvements:
-        lines.append("Areas to improve")
-        for item in improvements:
-            text = (item or "").strip()
-            if text:
-                lines.append(f"  • {text}")
-        lines.append("")
-
-    recommendation = (feedback.get("recommendation") or "").strip()
-    if recommendation:
-        lines.extend(["Recommendation", recommendation, ""])
-
-    decision = (feedback.get("interview_decision") or "").strip()
-    if decision:
-        lines.extend(["Interview decision", decision, ""])
-
-    detailed = (feedback.get("detailed_feedback") or "").strip()
-    if detailed:
-        lines.extend(["Detailed feedback", detailed, ""])
-
-    lines.extend(
-        [
-            "—",
-            "This message was sent from Real Interview. Keep practicing and good luck!",
-        ]
-    )
-    return "\n".join(lines)
-
-
-def send_interview_feedback_email(
-    *,
-    candidate_email: str,
-    feedback: Dict[str, Any],
-    role_applied_for: str = "",
-    session_id: str = "",
-) -> tuple[bool, str]:
-    """Email post-interview feedback to the candidate."""
-    if not interview_feedback_email_enabled():
-        return False, "interview feedback email is disabled"
-    if not is_smtp_available():
-        return False, "email delivery is not configured"
-
-    to_email = (candidate_email or "").strip().lower()
-    if not to_email:
-        return False, "candidate email is missing"
-
-    role = (role_applied_for or "").strip()
-    subject = "[Real Interview] Your interview feedback"
-    if role:
-        subject = f"[Real Interview] Feedback for {role}"
-
-    body = _format_interview_feedback_body(
-        feedback=feedback,
-        role_applied_for=role,
-        session_id=session_id,
-    )
-    ok, err = _send_email(to_email=to_email, subject=subject, body=body)
-    if ok:
-        logger.info("[email_service] interview feedback email sent session_id=%s", session_id)
-    return ok, err
 
 
 def send_feedback_email(

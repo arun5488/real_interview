@@ -1,19 +1,21 @@
 from typing import Any, Dict, Tuple
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, g, jsonify, request, send_file
+import io
 
 from app.real_interview import logger
 from app.real_interview.backend.auth.jwt_auth import interview_session_owned_by, require_auth
 from app.real_interview.backend.services.job_application import get_job_application_for_customer
 from app.real_interview.backend.services.interview_service import (
     advance_to_next_interviewer,
+    build_interview_report_pdf,
     complete_interview,
+    get_interview_report,
     get_interview_state,
     list_user_interview_sessions,
     pause_interview,
     resume_interview,
     send_interview_message,
-    set_interview_preferences,
     start_interview,
 )
 from app.real_interview.backend.services.pdfreader import resume_reader
@@ -189,39 +191,54 @@ def interview_complete_route():
     if not ok:
         return err
 
-    email_feedback = body.get("email_feedback")
-    if email_feedback is not None and not isinstance(email_feedback, bool):
-        return jsonify({"error": "email_feedback must be a boolean"}), 400
-
-    result = complete_interview(session_id=session_id, email_feedback=email_feedback)
+    result = complete_interview(session_id=session_id)
     return _response(result)
 
 
-@interview_blueprint.route("/interview/preferences", methods=["PUT"])
+@interview_blueprint.route("/interview/report", methods=["GET"])
 @require_auth
-def interview_preferences_route():
-    logger.info("[interview][PUT /api/interview/preferences]")
-    body = _parse_json_body()
-    if body is None:
-        return jsonify({"error": "invalid JSON body"}), 400
-
-    session_id = body.get("session_id") or body.get("thread_id")
-    if not isinstance(session_id, str) or not session_id.strip():
-        return jsonify({"error": "session_id is required"}), 400
-
-    if "email_feedback_opt_in" not in body or not isinstance(body.get("email_feedback_opt_in"), bool):
-        return jsonify({"error": "email_feedback_opt_in (boolean) is required"}), 400
+def interview_report_route():
+    session_id = request.args.get("session_id") or request.args.get("thread_id")
+    if not session_id or not session_id.strip():
+        return jsonify({"error": "session_id query parameter is required"}), 400
 
     session_id = session_id.strip()
     ok, err = _verify_interview_session(session_id)
     if not ok:
         return err
 
-    result = set_interview_preferences(
-        session_id=session_id,
-        email_feedback_opt_in=body["email_feedback_opt_in"],
-    )
+    logger.info("[interview][GET /api/interview/report] session_id=%s", session_id)
+    result = get_interview_report(session_id=session_id, customer_id=g.current_user_id)
     return _response(result)
+
+
+@interview_blueprint.route("/interview/report/download", methods=["GET"])
+@require_auth
+def interview_report_download_route():
+    session_id = request.args.get("session_id") or request.args.get("thread_id")
+    if not session_id or not session_id.strip():
+        return jsonify({"error": "session_id query parameter is required"}), 400
+
+    session_id = session_id.strip()
+    ok, err = _verify_interview_session(session_id)
+    if not ok:
+        return err
+
+    logger.info("[interview][GET /api/interview/report/download] session_id=%s", session_id)
+    status_code, meta, pdf_bytes = build_interview_report_pdf(
+        session_id=session_id,
+        customer_id=g.current_user_id,
+    )
+    if status_code != 200 or pdf_bytes is None:
+        return jsonify(meta), status_code
+
+    filename = meta.get("filename") or "interview-report.pdf"
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/pdf",
+    )
 
 
 @interview_blueprint.route("/interview/sessions", methods=["GET"])

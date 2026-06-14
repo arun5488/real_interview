@@ -1,6 +1,7 @@
+import io
 from typing import Any, Dict
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, g, jsonify, request, send_file
 from pymongo.errors import PyMongoError
 
 from app.real_interview import logger
@@ -70,6 +71,38 @@ def get_resume_route(resume_id: str):
             reader.close()
 
     return jsonify({"resume": resume}), 200
+
+
+@resume_blueprint.route("/resumes/<resume_id>/download", methods=["GET"])
+@require_auth
+def download_resume_route(resume_id: str):
+    logger.info("[resume][GET /api/resumes/%s/download] start", resume_id)
+    userid = g.current_user_id
+
+    reader: resume_reader | None = None
+    try:
+        reader = resume_reader()
+        data, filename, content_type = reader.get_resume_file_bytes(userid, resume_id)
+    except ValueError as exc:
+        logger.warning("[resume][GET /api/resumes/%s/download] %s", resume_id, exc)
+        status = 404 if "not found" in str(exc).lower() else 400
+        return jsonify({"error": str(exc)}), status
+    except PyMongoError:
+        logger.exception("[resume][GET /api/resumes/%s/download] MongoDB error", resume_id)
+        return jsonify({"error": "storage error"}), 500
+    except Exception:
+        logger.exception("[resume][GET /api/resumes/%s/download] unexpected error", resume_id)
+        return jsonify({"error": "failed to download resume"}), 500
+    finally:
+        if reader is not None:
+            reader.close()
+
+    return send_file(
+        io.BytesIO(data),
+        as_attachment=True,
+        download_name=filename,
+        mimetype=content_type,
+    )
 
 
 @resume_blueprint.route("/resumes", methods=["POST"])

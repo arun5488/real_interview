@@ -40,6 +40,18 @@ def _start_of_day_utc(now: datetime) -> datetime:
     return datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
 
 
+def _active_candidate_ids(users) -> List[Any]:
+    """User ids still present in authentications (excludes deleted accounts)."""
+    return [doc["_id"] for doc in users.find({}, {"_id": 1})]
+
+
+def _interviews_for_active_candidates(active_ids: List[Any]) -> Dict[str, Any]:
+    """Mongo filter: interviews whose candidate still has an account."""
+    if not active_ids:
+        return {"candidate_id": {"$exists": False}}  # match nothing
+    return {"candidate_id": {"$in": active_ids}}
+
+
 def get_admin_dashboard(*, days: int = 30, user_limit: int = 50) -> Dict[str, Any]:
     """Aggregate signups and interview usage metrics for the admin dashboard."""
     days = max(1, min(int(days), 365))
@@ -56,29 +68,40 @@ def get_admin_dashboard(*, days: int = 30, user_limit: int = 50) -> Dict[str, An
         resumes = db[_resumes_collection()]
         jobs = db[_jobs_collection()]
 
+        active_candidate_ids = _active_candidate_ids(users)
+        active_interviews = _interviews_for_active_candidates(active_candidate_ids)
+
         total_users = users.count_documents({})
         users_new_period = users.count_documents({"created_ts": {"$gte": since}})
         users_new_7d = users.count_documents({"created_ts": {"$gte": week_start}})
         users_new_today = users.count_documents({"created_ts": {"$gte": today_start}})
 
-        interviews_total = interviews.count_documents({})
-        interviews_active = interviews.count_documents({"interview_status": "active"})
-        interviews_paused = interviews.count_documents({"interview_status": "paused"})
+        interviews_total = interviews.count_documents(active_interviews)
+        interviews_active = interviews.count_documents(
+            {**active_interviews, "interview_status": "active"}
+        )
+        interviews_paused = interviews.count_documents(
+            {**active_interviews, "interview_status": "paused"}
+        )
         interviews_completed = interviews.count_documents(
             {
+                **active_interviews,
                 "$or": [
                     {"interview_status": "completed"},
                     {"interview_feedback": {"$exists": True, "$ne": None}},
-                ]
+                ],
             }
         )
-        interviews_in_period = interviews.count_documents({"interview_date": {"$gte": since}})
+        interviews_in_period = interviews.count_documents(
+            {**active_interviews, "interview_date": {"$gte": since}}
+        )
         interviews_not_started = interviews.count_documents(
             {
+                **active_interviews,
                 "$or": [
                     {"messages": {"$exists": False}},
                     {"messages": {"$size": 0}},
-                ]
+                ],
             }
         )
 
@@ -99,7 +122,7 @@ def get_admin_dashboard(*, days: int = 30, user_limit: int = 50) -> Dict[str, An
 
         recent_interviews: List[Dict[str, Any]] = []
         for doc in interviews.find(
-            {},
+            active_interviews,
             {
                 "session_id": 1,
                 "candidate_id": 1,

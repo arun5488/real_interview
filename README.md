@@ -133,9 +133,8 @@ Copy from `.env_copy` and set these on your host (never commit real `.env`):
 | `FEEDBACK_TO_EMAIL` | Yes (feedback) | Inbox for `/feedback` submissions; defaults to first `ADMIN_EMAILS` if unset |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` | Yes (feedback) | Outbound mail (e.g. Gmail + [app password](https://support.google.com/accounts/answer/185833)) |
 | `SMTP_USE_TLS` | Optional | Default `true` (port `587`) |
-| `SEND_INTERVIEW_FEEDBACK_EMAIL` | Optional | Default `false` — email post-interview feedback to candidates (disabled in production) |
 | `EMAIL_PROVIDER` | Optional | `smtp` (local) or `resend` (required on Render free — SMTP ports blocked) |
-| `RESEND_API_KEY` | Yes (resend) | From [resend.com](https://resend.com) — used when `EMAIL_PROVIDER=resend` |
+| `RESEND_API_KEY` | Yes (resend) | From **[resend.com/api-keys](https://resend.com/api-keys)** (starts with `re_`) — **not** Render Account → API Keys |
 | `RESEND_FROM_EMAIL` | Yes (resend) | e.g. `onboarding@resend.dev` (test sender; must match Resend account setup) |
 | `FEEDBACK_FROM_EMAIL` | Optional | Sender address; defaults to `SMTP_USER` or `RESEND_FROM_EMAIL` |
 | `FEEDBACK_FROM_NAME` | Optional | Display name in the From header (default `Real Interview`) |
@@ -156,7 +155,7 @@ Do **not** set `ALLOW_INSECURE_JWT_DEV` on a public host.
 
 **Free tier notes:** service sleeps after ~15 minutes with no traffic; any visit wakes it. You get 750 instance-hours/month. For always-on hosting, change `plan: free` to `plan: starter` in `render.yaml`.
 
-**Email on free tier:** Render [blocks outbound SMTP](https://render.com/changelog/free-web-services-will-no-longer-allow-outbound-traffic-to-smtp-ports) on ports 25, 465, and 587 — Gmail SMTP will fail with `Network is unreachable`. Use **`EMAIL_PROVIDER=resend`** with a [Resend](https://resend.com) API key (HTTPS), or upgrade to a paid Render instance to use SMTP. With Resend’s test sender (`onboarding@resend.dev`), set **`FEEDBACK_TO_EMAIL`** to the same address you used to sign up at Resend — website feedback from `/feedback` will deliver there. Post-interview feedback to candidates is disabled (on-screen only).
+**Email on free tier:** Render [blocks outbound SMTP](https://render.com/changelog/free-web-services-will-no-longer-allow-outbound-traffic-to-smtp-ports) on ports 25, 465, and 587 — Gmail SMTP will fail with `Network is unreachable`. Use **`EMAIL_PROVIDER=resend`** with a [Resend](https://resend.com) API key (HTTPS), or upgrade to a paid Render instance to use SMTP. With Resend’s test sender (`onboarding@resend.dev`), set **`FEEDBACK_TO_EMAIL`** to the same address you used to sign up at Resend — website feedback from `/feedback` will deliver there.
 
 ### Railway / Heroku / Docker
 
@@ -362,7 +361,10 @@ All panelists are in the room from the start. After each answer, a **panel coord
 
 If you reply that you have **no questions** when invited, the interview ends immediately and post-interview feedback is generated. You can still click **End interview** early at any time.
 
-Post-interview feedback is shown on screen when the session ends; it is not emailed to candidates.
+Post-interview feedback is shown as an **interview report** when the session ends. Download it as a PDF from the interview screen or from **Completed interviews** on your profile.
+
+| `GET /api/interview/report?session_id=…` | JWT | Structured report JSON (completed sessions only) |
+| `GET /api/interview/report/download?session_id=…` | JWT | PDF download |
 
 ```
 [I1]: Hi Alex, I'm on the engineering panel. I've reviewed your background on the payments service —
@@ -421,7 +423,7 @@ After **End interview**, the feedback agent may produce structured output like:
 }
 ```
 
-This feedback appears in the UI under **Post-interview feedback**; the full message history and summaries remain in MongoDB for that session.
+This feedback appears in the UI as an **interview report** with a **Download PDF** button; the full message history and summaries remain in MongoDB for that session.
 
 ---
 

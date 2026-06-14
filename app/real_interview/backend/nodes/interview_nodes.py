@@ -20,8 +20,8 @@ from app.real_interview.backend.services.interview_closing import (
     counts_from_state,
     increment_interviewer_question_count,
     max_candidate_qa_turns,
-    max_questions_per_interviewer,
     panel_closing_message,
+    question_limit_from_state,
 )
 from app.real_interview.backend.services.question_bank import (
     append_questions_to_bank,
@@ -48,6 +48,10 @@ def _summarizer_threshold() -> int:
 def _interviewer_code(interviewer_index: int) -> str:
     """Public label for interviewers in chat (I1, I2, …)."""
     return f"I{interviewer_index + 1}"
+
+
+def _question_limit(state: InterviewPipelineState) -> int:
+    return question_limit_from_state(state)
 
 
 def _prefix_interviewer_message(content: str, interviewer_index: int) -> str:
@@ -134,11 +138,16 @@ def _update_question_bank_from_messages(
 def load_context_node(state: InterviewPipelineState) -> Dict[str, Any]:
     logger.info("[interview_nodes] load_context customer_id=%s", state.get("customer_id"))
     try:
+        from app.real_interview.backend.services.user_interview_preferences import (
+            resolve_max_questions_per_interviewer_for_user,
+        )
+
         ctx = load_interview_context(
             customer_id=state["customer_id"],
             resume_id=state["resume_id"],
             job_application_id=state["job_application_id"],
         )
+        question_limit = resolve_max_questions_per_interviewer_for_user(state["customer_id"])
         return {
             **ctx,
             "step": "loaded",
@@ -151,6 +160,7 @@ def load_context_node(state: InterviewPipelineState) -> Dict[str, Any]:
             "interview_complete": False,
             "interview_phase": "active",
             "interviewer_question_counts": state.get("interviewer_question_counts") or {},
+            "max_questions_per_interviewer": question_limit,
             "candidate_qa_turns": int(state.get("candidate_qa_turns") or 0),
             "pending_auto_complete": False,
         }
@@ -211,6 +221,7 @@ def _run_panel_speakers(
         return {"step": "interview_ready"}
 
     counts = dict(question_counts or counts_from_state(state.get("interviewer_question_counts"), panel_size))
+    limit = _question_limit(state)
     impression = state.get("first_impression") or {}
     candidate_role = impression.get("candidate_role") or state.get("job_role") or ""
     agent = InterviewerAgent()
@@ -222,7 +233,7 @@ def _run_panel_speakers(
     for order, idx in enumerate(speaker_indices):
         if idx >= len(selected):
             continue
-        if not opening and counts.get(idx, 0) >= max_questions_per_interviewer():
+        if not opening and counts.get(idx, 0) >= limit:
             continue
         interviewer_type = selected[idx]
         local_state: InterviewPipelineState = {**state, "asked_question_hashes": asked}
@@ -386,7 +397,7 @@ def panel_turn_node(state: InterviewPipelineState) -> Dict[str, Any]:
             return _finish_interview(state, counts)
         return _run_candidate_qa_turn(state, counts)
 
-    if all_panelists_at_question_limit(counts, panel_size):
+    if all_panelists_at_question_limit(counts, panel_size, limit=_question_limit(state)):
         logger.info("[interview_nodes] all panelists reached question limit; inviting candidate questions")
         return _begin_awaiting_candidate_questions(state, counts)
 
@@ -396,11 +407,11 @@ def panel_turn_node(state: InterviewPipelineState) -> Dict[str, Any]:
         messages=list(state.get("messages") or []),
         running_summary=state.get("running_summary") or "",
     )
-    limit = max_questions_per_interviewer()
+    limit = _question_limit(state)
     speaker_indices = [idx for idx in speaker_indices if counts.get(idx, 0) < limit]
 
     if not speaker_indices:
-        if all_panelists_at_question_limit(counts, panel_size):
+        if all_panelists_at_question_limit(counts, panel_size, limit=limit):
             return _begin_awaiting_candidate_questions(state, counts)
         speaker_indices = [
             idx for idx, count in counts.items() if count < limit

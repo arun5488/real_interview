@@ -40,6 +40,7 @@ class InterviewPipelineState(TypedDict, total=False):
     # active | awaiting_candidate_questions | candidate_qa
     interview_phase: str
     interviewer_question_counts: dict[str, int]
+    max_questions_per_interviewer: int
     candidate_qa_turns: int
     pending_auto_complete: bool
 

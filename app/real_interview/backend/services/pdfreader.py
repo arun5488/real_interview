@@ -394,7 +394,7 @@ class resume_reader:
             self._collection()
             .find(
                 {"userid": user_oid},
-                {"uploaded_ts": 1, "parsed_data.name": 1, "resume_file.filename": 1},
+                {"uploaded_ts": 1, "parsed_data.name": 1, "resume_file.filename": 1, "resume_file.file_id": 1},
             )
             .sort("uploaded_ts", -1)
         )
@@ -412,6 +412,7 @@ class resume_reader:
                     "resume_id": str(doc["_id"]),
                     "uploaded_ts": uploaded_ts,
                     "label": label,
+                    "downloadable": bool((resume_file.get("file_id") or "").strip()),
                 }
             )
         logger.info("[resume_reader] listed %s resume(s) for user %s", len(items), user_oid)
@@ -451,6 +452,40 @@ class resume_reader:
             "parsed_data": parsed_data,
             "resume_file": resume_file,
         }
+
+    def get_resume_file_bytes(
+        self,
+        userid: Union[str, ObjectId],
+        resume_id: Union[str, ObjectId],
+    ) -> Tuple[bytes, str, str]:
+        """Return original resume file bytes, filename, and content type."""
+        user_oid = _as_user_object_id(userid)
+        resume_oid = _as_user_object_id(resume_id)
+        doc = self._collection().find_one(
+            {"_id": resume_oid, "userid": user_oid},
+            {"resume_file": 1},
+        )
+        if not doc:
+            raise ValueError("resume not found for this user")
+
+        resume_file = doc.get("resume_file") or {}
+        file_id_str = (resume_file.get("file_id") or "").strip()
+        if not file_id_str:
+            raise ValueError("original resume file is not available for download")
+
+        try:
+            file_oid = ObjectId(file_id_str)
+        except InvalidId as exc:
+            raise ValueError("resume file reference is invalid") from exc
+
+        try:
+            grid_out = self._fs.get(file_oid)
+        except Exception as exc:
+            raise ValueError("resume file not found in storage") from exc
+
+        filename = (grid_out.filename or resume_file.get("filename") or "resume").strip()
+        content_type = (grid_out.content_type or "application/octet-stream").strip()
+        return grid_out.read(), filename, content_type
 
     def delete_all_resumes_for_user(self, userid: Union[str, ObjectId]) -> Tuple[int, int]:
         """

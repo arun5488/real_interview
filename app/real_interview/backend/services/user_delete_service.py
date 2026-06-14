@@ -24,10 +24,6 @@ def _get_job_applications_collection_name() -> str:
     return os.getenv("MONGODB_COLLECTION_JOB_APPLICATIONS", "job_application").strip()
 
 
-def _get_interview_collection_name() -> str:
-    return os.getenv("MONGODB_COLLECTION_INTERVIEW", "interview").strip()
-
-
 def _delete_job_applications_for_customer(db, customer_oid: ObjectId) -> int:
     coll_name = _get_job_applications_collection_name()
     logger.info("[user_delete] deleting job_application docs for customer_id=%s", customer_oid)
@@ -37,19 +33,18 @@ def _delete_job_applications_for_customer(db, customer_oid: ObjectId) -> int:
     return count
 
 
-def _delete_interview_records_for_customer(db, customer_oid: ObjectId) -> int:
-    coll_name = _get_interview_collection_name()
-    logger.info("[user_delete] deleting interview docs for candidate_id=%s", customer_oid)
-    result = db[coll_name].delete_many({"customer_id": customer_oid})
-    count = int(result.deleted_count)
-    logger.info("[user_delete] deleted %s interview document(s)", count)
-    return count
+def _delete_incomplete_interviews_for_customer(customer_oid: ObjectId) -> tuple[int, int]:
+    """Delete in-progress interviews only; completed sessions are retained."""
+    from app.real_interview.backend.services.interview_record import delete_incomplete_interviews_for_candidate
+
+    return delete_incomplete_interviews_for_candidate(str(customer_oid))
 
 
 def delete_user_account(email: str, password: str) -> Dict[str, Any]:
     """
     Verify email/password, then remove the user from authentications and delete
-    related resumes (including GridFS), job_application, and interview records.
+    related resumes (including GridFS), job applications, and in-progress interviews.
+    Completed interview records are kept with candidate_id for analytics.
     """
     logger.info("[user_delete] delete_user_account start email=%s", email)
     reader: resume_reader | None = None
@@ -87,14 +82,14 @@ def delete_user_account(email: str, password: str) -> Dict[str, Any]:
         resumes_deleted, gridfs_deleted = reader.delete_all_resumes_for_user(user_oid)
 
         from app.real_interview.backend.graphs.checkpointer import delete_thread_checkpoints
-        from app.real_interview.backend.services.interview_record import list_session_ids_for_candidate
+        from app.real_interview.backend.services.interview_record import list_incomplete_session_ids_for_candidate
 
-        for session_id in list_session_ids_for_candidate(str(user_oid)):
+        for session_id in list_incomplete_session_ids_for_candidate(str(user_oid)):
             delete_thread_checkpoints(session_id)
 
         db = get_mongodb_database(_get_db_name())
         jobs_deleted = _delete_job_applications_for_customer(db, user_oid)
-        interviews_deleted = _delete_interview_records_for_customer(db, user_oid)
+        interviews_deleted, interviews_retained = _delete_incomplete_interviews_for_customer(user_oid)
 
         delete_result = auth_coll.delete_one({"_id": user_oid})
         if delete_result.deleted_count != 1:
@@ -102,12 +97,14 @@ def delete_user_account(email: str, password: str) -> Dict[str, Any]:
             return _error(500, "failed to delete user account")
 
         logger.info(
-            "[user_delete] account removed user_id=%s resumes=%s gridfs=%s jobs=%s interviews=%s",
+            "[user_delete] account removed user_id=%s resumes=%s gridfs=%s jobs=%s "
+            "interviews_deleted=%s interviews_retained=%s",
             user_oid,
             resumes_deleted,
             gridfs_deleted,
             jobs_deleted,
             interviews_deleted,
+            interviews_retained,
         )
         return _success(
             200,
@@ -118,7 +115,10 @@ def delete_user_account(email: str, password: str) -> Dict[str, Any]:
                     "resumes": resumes_deleted,
                     "gridfs_files": gridfs_deleted,
                     "job_application": jobs_deleted,
-                    "interview": interviews_deleted,
+                    "interview_in_progress": interviews_deleted,
+                },
+                "retained": {
+                    "interview_completed": interviews_retained,
                 },
             },
         )
