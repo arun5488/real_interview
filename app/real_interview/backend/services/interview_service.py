@@ -525,7 +525,9 @@ def complete_interview(
 
 def get_interview_report(*, session_id: str, customer_id: str) -> Dict[str, Any]:
     """Return structured report payload for a completed interview."""
+    from app.real_interview.backend.services.ideal_answer_report_service import ensure_ideal_answers_report
     from app.real_interview.backend.services.interview_report_service import build_report_payload
+    from app.real_interview.backend.services.user_maintenance import is_ideal_answer_report_enabled
 
     record = interview_db.get_interview_by_session(session_id)
     if not record:
@@ -538,10 +540,25 @@ def get_interview_report(*, session_id: str, customer_id: str) -> Dict[str, Any]
             "error": "report is available after the interview is completed",
             "session_id": session_id,
         }
+
+    enabled = is_ideal_answer_report_enabled(customer_id)
+    if enabled:
+        ensure_ideal_answers_report(
+            session_id=session_id,
+            customer_id=customer_id,
+            record=record,
+        )
+        record = interview_db.get_interview_by_session(session_id) or record
+
+    payload = build_report_payload(record)
+    payload["ideal_answer_report_enabled"] = enabled
+    if not enabled:
+        payload["ideal_answers_report"] = None
+
     return {
         "status_code": 200,
         "session_id": session_id,
-        "report": build_report_payload(record),
+        "report": payload,
     }
 
 

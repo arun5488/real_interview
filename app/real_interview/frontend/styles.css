@@ -445,6 +445,33 @@ label.confirm-delete input {
   border: 1px solid var(--border);
 }
 
+.chat-bubble.avatar {
+  align-self: flex-start;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  border: 1px solid var(--accent-dim);
+  border-left: 3px solid var(--accent);
+}
+
+.avatar-discuss-messages {
+  min-height: 14rem;
+}
+
+.avatar-discuss-meta {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.avatar-discuss-sources {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+}
+
+.avatar-discuss-sources a {
+  word-break: break-all;
+}
+
 .chat-form {
   display: flex;
   gap: 0.5rem;
@@ -731,6 +758,51 @@ label.confirm-delete input {
 
 .profile-max-questions-effective {
   margin: 0.35rem 0 0;
+}
+
+.profile-ideal-answers-setting {
+  margin-top: 1rem;
+  max-width: 36rem;
+}
+
+.profile-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.profile-toggle input {
+  margin-top: 0.2rem;
+}
+
+.ideal-answer-item {
+  margin: 0.75rem 0 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--bg) 92%, var(--accent) 8%);
+}
+
+.ideal-answer-item h5 {
+  margin: 0 0 0.35rem;
+  font-size: 0.92rem;
+}
+
+.ideal-answer-item p {
+  margin: 0.35rem 0 0;
+  font-size: 0.88rem;
+}
+
+.ideal-answer-sources {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+}
+
+.ideal-answer-sources a {
+  word-break: break-all;
 }
 
 .report-download-link {

@@ -7,6 +7,7 @@ from app.real_interview.backend.auth.jwt_auth import validate_jwt_config
 from app.real_interview.backend.utils.mongodb import get_shared_mongodb_client
 from app.real_interview.backend.routes import (
     admin_blueprint,
+    avatar_blueprint,
     feedback_blueprint,
     interview_blueprint,
     job_application_blueprint,
@@ -34,6 +35,9 @@ def create_app() -> Flask:
 
     logger.info("[app_factory] registering interview blueprint")
     app.register_blueprint(interview_blueprint)
+
+    logger.info("[app_factory] registering avatar blueprint")
+    app.register_blueprint(avatar_blueprint)
 
     logger.info("[app_factory] registering admin blueprint")
     app.register_blueprint(admin_blueprint)

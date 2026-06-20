@@ -6,7 +6,7 @@ from app.real_interview.backend.services.interview_record import (
     list_interviews_for_candidate_by_kind,
 )
 from app.real_interview.backend.services.user_interview_preferences import (
-    build_max_questions_setting_payload,
+    build_interview_settings_payload,
 )
 
 
@@ -22,9 +22,7 @@ def get_user_profile(*, customer_id: str, email: str) -> Dict[str, Any]:
         "status_code": 200,
         "email": email,
         "interview_counts": counts,
-        "interview_settings": {
-            "max_questions_per_interviewer": build_max_questions_setting_payload(customer_id),
-        },
+        "interview_settings": build_interview_settings_payload(customer_id),
     }
 
 

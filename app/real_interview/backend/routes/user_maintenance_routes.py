@@ -18,9 +18,7 @@ from app.real_interview.backend.services.user_maintenance import (
     sign_up_user,
 )
 from app.real_interview.backend.services.user_profile_service import get_user_profile, list_profile_interviews
-from app.real_interview.backend.services.user_interview_preferences import (
-    update_max_questions_per_interviewer_preference,
-)
+from app.real_interview.backend.services.user_interview_preferences import update_interview_settings
 
 user_maintenance_blueprint = Blueprint("user_maintenance", __name__, url_prefix="/api")
 
@@ -105,20 +103,36 @@ def user_profile_interview_settings_route():
     if body is None:
         return jsonify({"error": "invalid JSON body"}), 400
 
-    if "max_questions_per_interviewer" not in body:
-        return jsonify({"error": "max_questions_per_interviewer is required"}), 400
+    has_max = "max_questions_per_interviewer" in body
+    has_ideal = "ideal_answer_report_enabled" in body
+    if not has_max and not has_ideal:
+        return jsonify(
+            {"error": "provide max_questions_per_interviewer and/or ideal_answer_report_enabled"}
+        ), 400
 
-    raw = body.get("max_questions_per_interviewer")
-    value: int | None
-    if raw is None:
-        value = None
-    else:
-        try:
-            value = int(raw)
-        except (TypeError, ValueError):
-            return jsonify({"error": "max_questions_per_interviewer must be an integer or null"}), 400
+    max_value: int | None | object = ...
+    if has_max:
+        raw = body.get("max_questions_per_interviewer")
+        if raw is None:
+            max_value = None
+        else:
+            try:
+                max_value = int(raw)
+            except (TypeError, ValueError):
+                return jsonify({"error": "max_questions_per_interviewer must be an integer or null"}), 400
 
-    result = update_max_questions_per_interviewer_preference(g.current_user_id, value)
+    ideal_enabled: bool | None = None
+    if has_ideal:
+        raw_ideal = body.get("ideal_answer_report_enabled")
+        if not isinstance(raw_ideal, bool):
+            return jsonify({"error": "ideal_answer_report_enabled must be a boolean"}), 400
+        ideal_enabled = raw_ideal
+
+    result = update_interview_settings(
+        g.current_user_id,
+        max_questions_per_interviewer=max_value,
+        ideal_answer_report_enabled=ideal_enabled,
+    )
     status_code = int(result.pop("status_code", 200))
     return jsonify(result), status_code
 

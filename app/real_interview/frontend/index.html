@@ -129,6 +129,7 @@
         <div class="profile-actions">
           <button type="button" id="btn-profile-start-interview" class="btn primary">Start interview</button>
           <button type="button" id="btn-profile-resume-interview" class="btn secondary">Resume interview</button>
+          <button type="button" id="btn-profile-discuss-avatar" class="btn secondary">Discuss with Avatar</button>
         </div>
 
         <div class="profile-stats" aria-label="Interview statistics">
@@ -168,6 +169,16 @@
               </button>
             </div>
           </form>
+          <div class="profile-ideal-answers-setting">
+            <label class="profile-toggle" for="profile-ideal-answers-enabled">
+              <input type="checkbox" id="profile-ideal-answers-enabled" name="ideal_answer_report_enabled" checked />
+              Include ideal answers in interview reports
+            </label>
+            <p id="profile-ideal-answers-hint" class="hint">
+              Ideal answers are generated when you open or download a completed report (past or new sessions).
+              Grounded in your resume; web sources are listed when used. Not shown during the live interview.
+            </p>
+          </div>
         </div>
 
         <div id="profile-interviews-wrap" class="profile-interviews-wrap is-hidden" hidden>
@@ -346,6 +357,33 @@
         <button type="button" id="btn-start-interview" class="btn primary is-hidden" hidden>
           Start interview
         </button>
+      </section>
+
+      <section id="view-avatar-discuss" class="card is-hidden" aria-labelledby="avatar-discuss-heading" hidden>
+        <h2 id="avatar-discuss-heading">Discuss with Avatar</h2>
+        <p class="signed-in">
+          Signed in as <code id="display-user-email-avatar"></code>
+          <button type="button" id="btn-back-profile-avatar" class="btn link">Back to profile</button>
+          <button type="button" id="btn-sign-out-avatar" class="btn link">Sign out</button>
+        </p>
+        <p id="avatar-discuss-intro" class="hint">
+          Ask any interview question. Your ideal avatar answers as you, grounded in your latest resume.
+        </p>
+        <p id="avatar-discuss-resume-label" class="avatar-discuss-meta"></p>
+        <div id="avatar-discuss-messages" class="chat-messages avatar-discuss-messages" role="log" aria-live="polite"></div>
+        <form id="form-avatar-discuss" class="chat-form" novalidate>
+          <label class="sr-only" for="avatar-discuss-input">Interview question</label>
+          <input
+            id="avatar-discuss-input"
+            type="text"
+            name="message"
+            placeholder="Ask an interview question…"
+            autocomplete="off"
+            required
+          />
+          <button type="submit" class="btn primary">Ask avatar</button>
+        </form>
+        <p id="avatar-discuss-message" class="message" role="status" aria-live="polite"></p>
       </section>
 
       <section id="view-interview-chat" class="card is-hidden" aria-labelledby="chat-heading" hidden>

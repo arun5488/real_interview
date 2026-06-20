@@ -190,6 +190,8 @@
     if (jobDisplay) jobDisplay.textContent = value;
     var chatDisplay = $("display-user-email-chat");
     if (chatDisplay) chatDisplay.textContent = value;
+    var avatarDisplay = $("display-user-email-avatar");
+    if (avatarDisplay) avatarDisplay.textContent = value;
   }
 
   function formatInterviewerMessageContent(content, panelPlan) {
@@ -289,19 +291,20 @@
     return section;
   }
 
-  function renderInterviewReport(state) {
+  function renderInterviewReportFromPayload(report) {
+    if (!report) return;
     var container = $("interview-report");
     if (!container) return;
 
     container.textContent = "";
-    var feedback = state.candidate_post_interview_feedback || {};
-    var summary = state.running_summary || "";
+    var feedback = report.feedback || {};
+    var summary = report.interview_summary || "";
 
     var meta = document.createElement("div");
     meta.className = "interview-report-meta";
     var metaBits = [];
-    if (state.job_role) metaBits.push("Role: " + state.job_role);
-    if (state.session_id) metaBits.push("Session: " + state.session_id);
+    if (report.role_applied_for) metaBits.push("Role: " + report.role_applied_for);
+    if (report.session_id) metaBits.push("Session: " + report.session_id);
     meta.textContent = metaBits.join(" · ");
     if (meta.textContent) container.appendChild(meta);
 
@@ -330,6 +333,109 @@
     if (feedback.detailed_feedback) {
       container.appendChild(createReportSection("Detailed feedback", feedback.detailed_feedback));
     }
+
+    renderIdealAnswersReport(container, report.ideal_answers_report);
+  }
+
+  function renderIdealAnswersReport(container, idealReport) {
+    if (!container || !idealReport) return;
+    var items = idealReport.items || [];
+    var avatarSummary = (idealReport.avatar_summary || "").trim();
+    if (!items.length && !avatarSummary) return;
+
+    var section = document.createElement("section");
+    section.className = "interview-report-section";
+
+    var heading = document.createElement("h4");
+    heading.textContent = "Ideal answers (resume avatar)";
+    section.appendChild(heading);
+
+    if (avatarSummary) {
+      var intro = document.createElement("p");
+      intro.textContent = avatarSummary;
+      section.appendChild(intro);
+    }
+
+    items.forEach(function (item, index) {
+      var block = document.createElement("article");
+      block.className = "ideal-answer-item";
+
+      var title = document.createElement("h5");
+      var label = "Question " + (index + 1);
+      if (item.interviewer) label += " · " + item.interviewer;
+      title.textContent = label;
+      block.appendChild(title);
+
+      if (item.question) {
+        var q = document.createElement("p");
+        q.innerHTML = "<strong>Asked:</strong> " + escapeHtml(item.question);
+        block.appendChild(q);
+      }
+      if (item.candidate_answer) {
+        var given = document.createElement("p");
+        given.innerHTML = "<strong>Your answer:</strong> " + escapeHtml(item.candidate_answer);
+        block.appendChild(given);
+      }
+      if (item.ideal_answer) {
+        var ideal = document.createElement("p");
+        ideal.innerHTML = "<strong>Ideal answer:</strong> " + escapeHtml(item.ideal_answer);
+        block.appendChild(ideal);
+      }
+
+      var sources = item.web_sources || [];
+      if (sources.length) {
+        var srcList = document.createElement("ul");
+        srcList.className = "ideal-answer-sources";
+        sources.forEach(function (source) {
+          if (!source || !source.url) return;
+          var li = document.createElement("li");
+          var link = document.createElement("a");
+          link.href = source.url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.textContent = source.title || source.url;
+          li.appendChild(link);
+          srcList.appendChild(li);
+        });
+        if (srcList.children.length) block.appendChild(srcList);
+      }
+
+      section.appendChild(block);
+    });
+
+    container.appendChild(section);
+  }
+
+  function escapeHtml(text) {
+    return String(text || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function renderInterviewReport(state) {
+    if (!state) return;
+    renderInterviewReportFromPayload({
+      session_id: state.session_id,
+      role_applied_for: state.job_role,
+      interview_summary: state.running_summary,
+      feedback: state.candidate_post_interview_feedback || {},
+      ideal_answers_report: state.ideal_answers_report || null,
+    });
+  }
+
+  function loadInterviewReport(sessionId, msgEl) {
+    if (!sessionId) return Promise.resolve();
+    if (msgEl) setMessage(msgEl, "Loading report (ideal answers may take a minute)…", "ok");
+    return apiGet("/api/interview/report?session_id=" + encodeURIComponent(sessionId)).then(function (r) {
+      if (!r.ok) {
+        if (msgEl) setMessage(msgEl, (r.data && r.data.error) || "Could not load report.", "error");
+        return;
+      }
+      renderInterviewReportFromPayload(r.data.report || {});
+      if (msgEl) clearMessage(msgEl);
+    });
   }
 
   function createDownloadIconButton(ariaLabel, onClick) {
@@ -415,7 +521,6 @@
     var feedback = state.candidate_post_interview_feedback;
     var wrap = $("interview-feedback-wrap");
     if (feedback && wrap) {
-      renderInterviewReport(state);
       showElement(wrap, true);
       showElement($("btn-download-interview-report"), true);
       showElement($("btn-back-profile-after-interview"), true);
@@ -424,6 +529,9 @@
       showElement($("btn-pause-interview"), false);
       showElement($("btn-resume-interview"), false);
       setInterviewPausedUi(false);
+      renderInterviewReport(state);
+      var sessionId = state.session_id || getStoredInterviewSession();
+      loadInterviewReport(sessionId, $("chat-message"));
     } else {
       showElement($("btn-back-profile-after-interview"), false);
       showElement($("btn-download-interview-report"), false);
@@ -458,6 +566,7 @@
     hideView("view-profile");
     hideView("view-upload");
     hideView("view-job-application");
+    hideView("view-avatar-discuss");
     showView("view-interview-chat");
     setSignedInEmail(email);
     if (sessionId) {
@@ -473,6 +582,7 @@
     hideView("view-upload");
     hideView("view-job-application");
     hideView("view-interview-chat");
+    hideView("view-avatar-discuss");
     showView("view-auth");
     showAuthPanel("signup");
     clearMessage($("auth-message"));
@@ -522,11 +632,103 @@
     }
   }
 
+  var avatarDiscussHistory = [];
+  var avatarDiscussResumeId = "";
+
+  function renderAvatarDiscussMessages() {
+    var container = $("avatar-discuss-messages");
+    if (!container) return;
+    container.textContent = "";
+    avatarDiscussHistory.forEach(function (m) {
+      var div = document.createElement("div");
+      var isUser = m.role === "user";
+      div.className = "chat-bubble " + (isUser ? "user" : "avatar");
+      if (isUser) {
+        div.textContent = m.content || "";
+      } else {
+        var label = document.createElement("strong");
+        label.textContent = "Ideal avatar: ";
+        div.appendChild(label);
+        var text = document.createElement("span");
+        text.textContent = m.content || "";
+        div.appendChild(text);
+        if (m.web_sources && m.web_sources.length) {
+          var ul = document.createElement("ul");
+          ul.className = "avatar-discuss-sources";
+          m.web_sources.forEach(function (source) {
+            if (!source || !source.url) return;
+            var li = document.createElement("li");
+            var link = document.createElement("a");
+            link.href = source.url;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = source.title || source.url;
+            li.appendChild(link);
+            ul.appendChild(li);
+          });
+          if (ul.children.length) div.appendChild(ul);
+        }
+      }
+      container.appendChild(div);
+    });
+    container.scrollTop = container.scrollHeight;
+  }
+
+  function showAvatarDiscussView(email) {
+    hideView("view-auth");
+    hideView("view-profile");
+    hideView("view-upload");
+    hideView("view-job-application");
+    hideView("view-interview-chat");
+    showView("view-avatar-discuss");
+    setSignedInEmail(email || getStoredUserEmail());
+    clearMessage($("avatar-discuss-message"));
+    avatarDiscussHistory = [];
+    avatarDiscussResumeId = "";
+    renderAvatarDiscussMessages();
+
+    var meta = $("avatar-discuss-resume-label");
+    var form = $("form-avatar-discuss");
+    var input = $("avatar-discuss-input");
+    if (form) form.reset();
+    if (input) input.disabled = true;
+    if (form) {
+      var submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+    }
+
+    return apiGet("/api/avatar/discuss/context").then(function (r) {
+      if (!r.ok) {
+        setMessage($("avatar-discuss-message"), (r.data && r.data.error) || "Could not load avatar.", "error");
+        return;
+      }
+      if (!r.data.ready) {
+        setMessage($("avatar-discuss-message"), r.data.message || "Upload a resume first.", "error");
+        if (meta) meta.textContent = "";
+        return;
+      }
+      avatarDiscussResumeId = r.data.resume_id || "";
+      if (meta) {
+        var bits = ["Resume: " + (r.data.resume_label || "Latest upload")];
+        if (r.data.candidate_name) bits.push("Avatar: " + r.data.candidate_name);
+        meta.textContent = bits.join(" · ");
+      }
+      var intro = $("avatar-discuss-intro");
+      if (intro && r.data.message) intro.textContent = r.data.message;
+      if (input) input.disabled = false;
+      if (form) {
+        var btn = form.querySelector('button[type="submit"]');
+        if (btn) btn.disabled = false;
+      }
+    });
+  }
+
   function showProfileView(email) {
     hideView("view-auth");
     hideView("view-upload");
     hideView("view-job-application");
     hideView("view-interview-chat");
+    hideView("view-avatar-discuss");
     showView("view-profile");
     setSignedInEmail(email);
     clearMessage($("profile-message"));
@@ -538,6 +740,7 @@
     hideView("view-profile");
     hideView("view-job-application");
     hideView("view-interview-chat");
+    hideView("view-avatar-discuss");
     showView("view-upload");
     setSignedInEmail(email);
     clearMessage($("auth-message"));
@@ -551,6 +754,7 @@
     hideView("view-profile");
     hideView("view-upload");
     hideView("view-interview-chat");
+    hideView("view-avatar-discuss");
     showView("view-job-application");
     setSignedInEmail(email);
     clearMessage($("auth-message"));
@@ -1205,30 +1409,56 @@
   }
 
   function renderProfileInterviewSettings(settings) {
-    var block = settings && settings.max_questions_per_interviewer;
-    if (!block) return;
+    if (!settings) return;
 
-    var defaultEl = $("profile-max-questions-default");
-    var input = $("profile-max-questions-input");
-    var effectiveEl = $("profile-max-questions-effective");
-    var minimum = block.minimum != null ? block.minimum : 4;
+    var block = settings.max_questions_per_interviewer;
+    if (block) {
+      var defaultEl = $("profile-max-questions-default");
+      var input = $("profile-max-questions-input");
+      var effectiveEl = $("profile-max-questions-effective");
+      var minimum = block.minimum != null ? block.minimum : 4;
 
-    if (defaultEl) defaultEl.textContent = String(block.default != null ? block.default : 8);
-    if (input) {
-      input.min = String(minimum);
-      input.value =
-        block.override != null && block.override !== ""
-          ? String(block.override)
-          : String(block.default != null ? block.default : 8);
-    }
-    if (effectiveEl) {
-      var effective = block.effective != null ? block.effective : block.default;
-      if (block.override != null && block.override !== "") {
-        effectiveEl.textContent = "Currently using your preference: " + effective + " questions per interviewer.";
-      } else {
-        effectiveEl.textContent = "Currently using the app default: " + effective + " questions per interviewer.";
+      if (defaultEl) defaultEl.textContent = String(block.default != null ? block.default : 8);
+      if (input) {
+        input.min = String(minimum);
+        input.value =
+          block.override != null && block.override !== ""
+            ? String(block.override)
+            : String(block.default != null ? block.default : 8);
+      }
+      if (effectiveEl) {
+        var effective = block.effective != null ? block.effective : block.default;
+        if (block.override != null && block.override !== "") {
+          effectiveEl.textContent =
+            "Currently using your preference: " + effective + " questions per interviewer.";
+        } else {
+          effectiveEl.textContent =
+            "Currently using the app default: " + effective + " questions per interviewer.";
+        }
       }
     }
+
+    var idealBlock = settings.ideal_answer_report;
+    var idealCheckbox = $("profile-ideal-answers-enabled");
+    if (idealCheckbox && idealBlock) {
+      idealCheckbox.checked = !!idealBlock.enabled;
+    }
+  }
+
+  function saveIdealAnswerReportSetting(enabled, msgEl) {
+    return apiPut("/api/users/profile/interview-settings", {
+      ideal_answer_report_enabled: !!enabled,
+    }).then(function (r) {
+      if (!r.ok) {
+        if (msgEl) setMessage(msgEl, (r.data && r.data.error) || "Could not save setting.", "error");
+        return false;
+      }
+      if (r.data.interview_settings) {
+        renderProfileInterviewSettings(r.data.interview_settings);
+      }
+      if (msgEl) setMessage(msgEl, r.data.message || "Setting saved.", "ok");
+      return true;
+    });
   }
 
   function loadProfileData() {
@@ -1276,6 +1506,17 @@
     var resumeBtn = $("btn-profile-resume-interview");
     if (resumeBtn) {
       resumeBtn.addEventListener("click", resumeLatestPausedInterview);
+    }
+
+    var discussBtn = $("btn-profile-discuss-avatar");
+    if (discussBtn) {
+      discussBtn.addEventListener("click", function () {
+        if (!isSignedIn()) {
+          handleUnauthorized();
+          return;
+        }
+        showAvatarDiscussView(getStoredUserEmail());
+      });
     }
 
     var completedLink = $("link-profile-completed");
@@ -1432,6 +1673,24 @@
           .finally(function () {
             resetSettingsBtn.disabled = false;
           });
+      });
+    }
+
+    var idealCheckbox = $("profile-ideal-answers-enabled");
+    if (idealCheckbox) {
+      idealCheckbox.addEventListener("change", function () {
+        var msg = $("profile-message");
+        clearMessage(msg);
+        if (!isSignedIn()) {
+          idealCheckbox.checked = !idealCheckbox.checked;
+          setMessage(msg, "Session missing. Please sign in again.", "error");
+          handleUnauthorized();
+          return;
+        }
+        idealCheckbox.disabled = true;
+        saveIdealAnswerReportSetting(idealCheckbox.checked, msg).finally(function () {
+          idealCheckbox.disabled = false;
+        });
       });
     }
 
@@ -1864,6 +2123,86 @@
     restoreInterviewChatFromSessionId(sessionId);
   }
 
+  function wireAvatarDiscuss() {
+    var backBtn = $("btn-back-profile-avatar");
+    if (backBtn) {
+      backBtn.addEventListener("click", function () {
+        showProfileView(getStoredUserEmail());
+      });
+    }
+
+    var form = $("form-avatar-discuss");
+    if (!form) return;
+
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var msg = $("avatar-discuss-message");
+      clearMessage(msg);
+
+      if (!isSignedIn()) {
+        handleUnauthorized();
+        return;
+      }
+
+      var input = $("avatar-discuss-input");
+      var text = input ? String(input.value || "").trim() : "";
+      if (!text) {
+        setMessage(msg, "Enter an interview question.", "error");
+        return;
+      }
+      if (!avatarDiscussResumeId) {
+        setMessage(msg, "Upload a resume on your profile first.", "error");
+        return;
+      }
+
+      avatarDiscussHistory.push({ role: "user", content: text });
+      renderAvatarDiscussMessages();
+      if (input) input.value = "";
+
+      var submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      if (input) input.disabled = true;
+      setMessage(msg, "Avatar is thinking…", "ok");
+
+      apiJson("/api/avatar/discuss", {
+        message: text,
+        resume_id: avatarDiscussResumeId,
+        history: avatarDiscussHistory.slice(0, -1),
+      })
+        .then(function (r) {
+          if (r.status === 401) {
+            handleUnauthorized();
+            return;
+          }
+          if (!r.ok) {
+            avatarDiscussHistory.pop();
+            renderAvatarDiscussMessages();
+            setMessage(msg, (r.data && r.data.error) || "Could not get avatar answer.", "error");
+            return;
+          }
+          avatarDiscussHistory.push({
+            role: "assistant",
+            content: r.data.ideal_answer || "",
+            web_sources: r.data.web_sources || [],
+          });
+          renderAvatarDiscussMessages();
+          clearMessage(msg);
+        })
+        .catch(function () {
+          avatarDiscussHistory.pop();
+          renderAvatarDiscussMessages();
+          setMessage(msg, "Network error. Try again.", "error");
+        })
+        .finally(function () {
+          if (submitBtn) submitBtn.disabled = false;
+          if (input) {
+            input.disabled = false;
+            input.focus();
+          }
+        });
+    });
+  }
+
   function wireSignOut() {
     function signOut() {
       showElement($("resume-list-wrap"), false);
@@ -1882,6 +2221,10 @@
       if (textarea) textarea.value = "";
       var chatBox = $("chat-messages");
       if (chatBox) chatBox.textContent = "";
+      avatarDiscussHistory = [];
+      avatarDiscussResumeId = "";
+      var avatarBox = $("avatar-discuss-messages");
+      if (avatarBox) avatarBox.textContent = "";
       hidePausedInterviewBanners();
       apiJson("/api/users/logout", {}).finally(function () {
         handleUnauthorized();
@@ -1894,6 +2237,8 @@
     if (jobBtn) jobBtn.addEventListener("click", signOut);
     var chatBtn = $("btn-sign-out-chat");
     if (chatBtn) chatBtn.addEventListener("click", signOut);
+    var avatarBtn = $("btn-sign-out-avatar");
+    if (avatarBtn) avatarBtn.addEventListener("click", signOut);
   }
 
   function boot() {
@@ -1904,6 +2249,7 @@
     wireResetPassword();
     wireDeleteAccount();
     wireProfile();
+    wireAvatarDiscuss();
     wireUpload();
     wireFetchResume();
     wireContinueToJob();

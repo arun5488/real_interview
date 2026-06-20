@@ -356,6 +356,26 @@ def save_interview_feedback(session_id: str, feedback: Dict[str, Any]) -> None:
     )
 
 
+def save_ideal_answers_report(session_id: str, report: Dict[str, Any]) -> None:
+    logger.info("[interview_record] save ideal_answers_report session_id=%s", session_id)
+    collection = _get_collection()
+    collection.update_one(
+        {"session_id": session_id},
+        {"$set": {"ideal_answers_report": report}},
+    )
+
+
+def clear_ideal_answers_reports_for_candidate(candidate_id: str) -> int:
+    """Remove cached ideal-answer reports for all completed interviews (forces regeneration)."""
+    candidate_oid = _as_object_id(candidate_id, "candidate_id")
+    collection = _get_collection()
+    result = collection.update_many(
+        _completed_interviews_query(candidate_oid),
+        {"$unset": {"ideal_answers_report": ""}},
+    )
+    return int(result.modified_count)
+
+
 def _serialize_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
     interview_date = doc.get("interview_date")
     paused_at = doc.get("paused_at")
@@ -371,6 +391,7 @@ def _serialize_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
         "paused_at": paused_at.isoformat() if hasattr(paused_at, "isoformat") else paused_at,
         "interview_summary": doc.get("interview_summary") or "",
         "interview_feedback": doc.get("interview_feedback"),
+        "ideal_answers_report": doc.get("ideal_answers_report"),
         "messages": [
             {
                 "role": m.get("role"),

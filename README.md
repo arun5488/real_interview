@@ -19,10 +19,10 @@ app/real_interview/
 ├── backend/
 │   ├── app_factory.py          # Flask app, blueprint registration, static UI routes
 │   ├── server.py               # Entry point — run this to start the server
-│   ├── routes/                 # HTTP layer (users, resumes, jobs, interview, admin, feedback)
+│   ├── routes/                 # HTTP layer (users, resumes, jobs, interview, avatar, admin, feedback)
 │   ├── auth/                   # JWT, cookies, rate limits, admin access
 │   ├── services/               # Business logic, MongoDB persistence, SMTP email
-│   ├── agents/                 # LLM agents (resume, job, interview panel)
+│   ├── agents/                 # LLM agents (resume, job, interview panel, candidate avatar)
 │   ├── graphs/                 # LangGraph interview workflows
 │   ├── nodes/                  # LangGraph node implementations
 │   ├── state/                  # Typed state and Pydantic schemas for the pipeline
@@ -50,6 +50,7 @@ params.yaml                     # Interview limits, summarizer/feedback threshol
 - Job description input parsing.
 - Chat interview simulation with configurable questions-per-interviewer (app default + per-user override).
 - Post-interview report (structured feedback + PDF download).
+- **Candidate Avatar** — ideal interview answers grounded in the resume (report + live **Discuss with Avatar** chat).
 - User profile — interview stats, paused/completed history, resume management, interview settings.
 - Website feedback page — visitors email suggestions and bug reports to the site owner.
 - Admin dashboard for signups and usage metrics (active accounts only).
@@ -128,7 +129,7 @@ Copy from `.env_copy` and set these on your host (never commit real `.env`):
 |----------|----------|-------|
 | `MONGODB_URI` | Yes | Same Atlas cluster as local dev |
 | `OPENAI_API_KEY` | Yes | |
-| `TAVILY_API_KEY` | Yes | Interviewer web search |
+| `TAVILY_API_KEY` | Yes | Interviewer + Candidate Avatar web search |
 | `JWT_SECRET_KEY` | Yes | Local: generate with `secrets.token_hex(32)`. Render: auto-generated via `generateValue: true` in `render.yaml` |
 | `ADMIN_EMAILS` | Yes (admin) | Comma-separated signup emails allowed to open `/admin` |
 | `FEEDBACK_TO_EMAIL` | Yes (feedback) | Inbox for `/feedback` submissions; defaults to first `ADMIN_EMAILS` if unset |
@@ -142,7 +143,7 @@ Copy from `.env_copy` and set these on your host (never commit real `.env`):
 | `COOKIE_SECURE` | Yes (HTTPS) | Set `true` on public HTTPS hosts |
 | `MONGODB_*` collections | Yes | See `.env_copy` for names |
 | `WEB_CONCURRENCY` | Recommended | `1` on Render free (512 MB); `2` on paid plans |
-| `GUNICORN_TIMEOUT` | Recommended | `120` — LLM turns can be slow |
+| `GUNICORN_TIMEOUT` | Recommended | `120` — LLM turns can be slow (avatar report generation can take up to ~60s) |
 
 Do **not** set `ALLOW_INSECURE_JWT_DEV` on a public host.
 
@@ -200,7 +201,8 @@ Copy `MONGODB_URI` from your local `.env` exactly (no leading/trailing spaces).
 3. Click **Start interview** → upload/select resume → save job application → start chat; confirm HR summary and `[I1]` opening message.
 4. Pause and resume — summary should carry over.
 5. End interview — interview report appears with **Download PDF**; completed row on profile shows a download icon for the report.
-6. Open **Send feedback** (footer link or `/feedback`) — confirm the message arrives in your inbox.
+6. Profile → **Discuss with Avatar** — ask a practice question; confirm the avatar replies using resume context.
+7. Open **Send feedback** (footer link or `/feedback`) — confirm the message arrives in your inbox.
 
 ### Open the UI
 
@@ -215,15 +217,16 @@ Use port **5000** unless you set `PORT` to something else in `.env`.
 ### Typical flow in the UI
 
 1. **Sign up** or **Log in** — opens **Your profile**
-2. **Interview settings** (optional) — override how many questions each panel member may ask (minimum 4; app default from `params.yaml`)
+2. **Interview settings** (optional) — question limit per panel member; toggle **ideal answers in reports** (on by default)
 3. **Start interview** — upload or select a resume, then save a job application
 4. **Live panel chat** — all panelists present from the start (`[I1]`, `[I2]`, …); follow-ups based on your answers
 5. **Pause interview** — conversation is summarized and saved; resume later from profile or upload flow
 6. **Resume interview** — continue the same session (profile **Resume interview** picks the latest paused session)
 7. **End interview** when ready — structured **interview report** with PDF download; **Back to profile** returns to your dashboard
 8. **Profile** — view completed/paused counts, download past resumes and summary reports, upload new resumes
-9. **Send feedback** (footer link) — report bugs or ideas about the site itself
-10. **Sign out** clears the browser session
+9. **Discuss with Avatar** — practice any interview question; ideal avatar answers from your resume (optional web sources)
+10. **Send feedback** (footer link) — report bugs or ideas about the site itself
+11. **Sign out** clears the browser session
 
 ---
 
@@ -235,10 +238,10 @@ After login or signup, candidates land on **Your profile** (`/` → profile view
 
 | Area | Description |
 |------|-------------|
-| **Actions** | **Start interview** (upload/job flow), **Resume interview** (latest paused session) |
+| **Actions** | **Start interview**, **Resume interview** (latest paused), **Discuss with Avatar** |
 | **Stats** | Clickable counts for completed and paused interviews |
 | **Interview tables** | Role, dates, status, message count; completed rows include a download icon for the PDF summary report |
-| **Interview settings** | Override `max_questions_per_interviewer` (stored in `authentications`; minimum **4**) |
+| **Interview settings** | Override `max_questions_per_interviewer` (minimum **4**); toggle **ideal answers in reports** |
 | **Resumes** | Upload PDF/DOC/DOCX; list saved files with **Download saved resume** |
 
 ### Interview question limit (per candidate)
@@ -258,12 +261,151 @@ Use **Use app default** on the profile to clear a personal override.
 |----------|---------|
 | `GET /api/users/profile` | Email, interview counts, interview settings (`default`, `override`, `effective`, `minimum`) |
 | `GET /api/users/profile/interviews?status=completed\|paused` | Interview list for profile tables |
-| `PUT /api/users/profile/interview-settings` | Body: `{ "max_questions_per_interviewer": 6 }` or `{ "max_questions_per_interviewer": null }` to reset |
+| `PUT /api/users/profile/interview-settings` | Body: `{ "max_questions_per_interviewer": 6 }`, `{ "ideal_answer_report_enabled": true }`, or either field alone |
 | `GET /api/resumes` | List saved resumes (includes `downloadable` flag) |
 | `GET /api/resumes/<resume_id>/download` | Download original uploaded file (GridFS) |
-| `GET /api/interview/report?session_id=…` | Structured report JSON (completed sessions) |
+| `GET /api/interview/report?session_id=…` | Structured report JSON (includes ideal answers when enabled) |
 | `GET /api/interview/report/download?session_id=…` | PDF download of summary report |
+| `GET /api/avatar/discuss/context` | Avatar chat readiness + latest resume metadata |
+| `POST /api/avatar/discuss` | Ask the ideal avatar a practice question (see [Candidate Avatar](#candidate-avatar)) |
 | `DELETE /api/users` | Delete account (email + password); removes auth, resumes, jobs, in-progress interviews; **completed** interviews retained in DB |
+
+---
+
+## Candidate Avatar
+
+The **Candidate Avatar** is an AI persona built from the candidate’s **parsed resume**. It speaks as the *ideal version* of that candidate: specific, honest, and grounded in real experience (no invented employers or degrees). It uses **Tavily web search** when factual context would improve an answer; sources are listed with titles and URLs.
+
+The avatar is **never** shown during the live mock interview. It appears in two places:
+
+| Mode | Where | When |
+|------|--------|------|
+| **Ideal answers in report** | Completed interview report (UI + PDF) | First open or download of a report |
+| **Discuss with Avatar** | Profile → **Discuss with Avatar** | Any time (requires an uploaded resume) |
+
+### Ideal answers in interview reports
+
+After a completed session, the report can include an **Ideal answers (resume avatar)** section: for each technical Q&A from the interview, the avatar shows what you said and a stronger **ideal answer**.
+
+| Setting | Default | Storage |
+|---------|---------|---------|
+| `ideal_answer_report_enabled` | **On** (missing field = enabled) | `authentications` collection |
+| Applies to | Past and new completed interviews | Generated on first report view/download, cached on the interview record as `ideal_answers_report` |
+
+Uncheck **Include ideal answers in interview reports** on your profile to opt out.
+
+**Example — one Q&A block in the report:**
+
+| Field | Example |
+|-------|---------|
+| **Asked** | How would you design a REST endpoint to create a payment idempotently? |
+| **Your answer** | I'd use a client-supplied idempotency key in a header, store keys in Redis or Mongo with TTL, and return the same response if the key repeats within 24 hours. |
+| **Ideal answer** | At Acme Payments I owned idempotent charge APIs. I'd require `Idempotency-Key` on POST, persist `(merchant_id, key) → response` in Mongo with a unique compound index and 24h TTL, return 201 with the same body on replay, and fail with 503 if the store is unavailable so we never double-charge. For scale I'd shard by merchant_id and monitor replay rate. |
+| **Web sources** | [Stripe — Idempotent requests](https://stripe.com/docs/api/idempotent_requests) |
+
+**Example — report JSON excerpt** (`GET /api/interview/report?session_id=…`):
+
+```json
+{
+  "session_id": "…",
+  "role_applied_for": "Senior Backend Engineer",
+  "feedback": { "overall_assessment": "…", "interview_decision": "hold" },
+  "ideal_answers_report": {
+    "avatar_summary": "Ideal persona based on five years of Python backend work and payments microservice ownership from the resume.",
+    "items": [
+      {
+        "interviewer": "I1",
+        "question": "How would you design a REST endpoint to create a payment idempotently?",
+        "candidate_answer": "I'd use a client-supplied idempotency key…",
+        "ideal_answer": "At Acme Payments I owned idempotent charge APIs…",
+        "web_sources": [
+          { "title": "Stripe — Idempotent requests", "url": "https://stripe.com/docs/api/idempotent_requests" }
+        ]
+      }
+    ]
+  },
+  "ideal_answer_report_enabled": true
+}
+```
+
+### Discuss with Avatar
+
+From **Your profile**, click **Discuss with Avatar** to open a practice chat. Ask **any** interview question; the avatar replies with the best answer *you* could give, using your **latest uploaded resume**. Conversation history is kept for follow-ups.
+
+**Example chat:**
+
+```
+You: How would you handle a production incident where error rates spike after a deploy?
+
+Ideal avatar: In my last role on the payments service, our playbook started with rollback if the deploy
+window matched the spike — which it did. I pulled Grafana dashboards for 5xx rate and p99 latency,
+joined the incident bridge with on-call and PM, and communicated a 15-minute customer-impact estimate.
+Root cause was a connection pool max size regression; we rolled back within 12 minutes, then added a
+canary deploy step and pool-saturation alerts. I'd quantify MTTR and affected request volume in the
+postmortem.
+
+Web sources:
+  • Google SRE — Incident Management
+  • https://sre.google/sre-book/managing-incidents/
+
+You: What would you put in the postmortem action items?
+
+Ideal avatar: I'd separate immediate fixes from process changes: (1) patch pool defaults and add an
+integration test that asserts pool config, (2) mandatory canary for payment paths, (3) runbook update
+with explicit rollback criteria, (4) blameless review within 48 hours with metrics — MTTR, customers
+affected, and repeat-incident risk.
+```
+
+**Requirements:** at least one resume on your profile. Rate limit: **30 questions per user per hour**.
+
+**Discuss API** (JWT required):
+
+| Endpoint | Method | Body / response |
+|----------|--------|-----------------|
+| `GET /api/avatar/discuss/context` | GET | `{ "ready": true, "resume_id", "resume_label", "candidate_name", "message" }` |
+| `POST /api/avatar/discuss` | POST | Request: `{ "message": "…", "history": [{ "role": "user\|assistant", "content": "…" }], "resume_id?": "…" }` → `{ "ideal_answer", "web_sources": [{ "title", "url" }] }` |
+
+**Example request:**
+
+```bash
+curl -X POST http://localhost:5000/api/avatar/discuss \
+  -H "Content-Type: application/json" \
+  -b "session=YOUR_JWT_COOKIE" \
+  -d '{
+    "message": "Explain CAP theorem in the context of our payment ledger.",
+    "history": []
+  }'
+```
+
+**Example response:**
+
+```json
+{
+  "resume_id": "674a…",
+  "question": "Explain CAP theorem in the context of our payment ledger.",
+  "ideal_answer": "For our ledger I'd prioritize consistency and partition tolerance: every debit/credit must balance atomically within a Mongo transaction or equivalent, even if we sacrifice availability during a network split — we'd rather reject writes briefly than show inconsistent balances. In practice at Acme we used primary reads for balance checks and async replication only for analytics, not customer-facing balance.",
+  "web_sources": [
+    {
+      "title": "MongoDB — Multi-Document Transactions",
+      "url": "https://www.mongodb.com/docs/manual/core/transactions/"
+    }
+  ]
+}
+```
+
+### Interview settings API (avatar + question limit)
+
+```json
+PUT /api/users/profile/interview-settings
+{
+  "max_questions_per_interviewer": 6,
+  "ideal_answer_report_enabled": true
+}
+```
+
+Set `"ideal_answer_report_enabled": false` to disable ideal answers in reports. Re-enabling clears cached ideal-answer reports so completed sessions regenerate on the next download.
+
+Optional env: `AVATAR_MAX_TOOL_ROUNDS` (default `4`) — max Tavily search rounds per avatar request.
 
 ---
 
@@ -471,6 +613,18 @@ After **End interview**, the feedback agent may produce structured output like:
 ```
 
 This feedback appears in the UI as an **interview report** with a **Download PDF** button; download past reports from **Your profile** → **Interviews completed**. Full message history and summaries remain in MongoDB for that session.
+
+### Ideal answers in the report (avatar)
+
+When **ideal answers in reports** is enabled (default), opening or downloading the report for the session above adds an **Ideal answers** section. Example for `[I1]`’s idempotency question:
+
+**Your answer (excerpt):**  
+*Unique index on (user_id, idempotency_key), maybe shard by user_id at scale.*
+
+**Ideal avatar answer (excerpt):**  
+*At Acme I implemented idempotent POST /charges with mandatory `Idempotency-Key`, a unique Mongo index on `(merchant_id, key)`, 24h TTL, 503 on store failure to avoid double-charge, and metrics on replay rate. I’d cite our postmortem where replay storms after a partial outage taught us to cap key length and log duplicate client retries.*
+
+See [Candidate Avatar](#candidate-avatar) for the full JSON shape, **Discuss with Avatar** chat, and API details.
 
 ---
 

@@ -340,3 +340,47 @@ def set_user_max_questions_override(user_id: str, value: int | None) -> Dict[str
     )
     return _success(200, {"message": "interview setting saved", "max_questions_per_interviewer": parsed})
 
+
+def is_ideal_answer_report_enabled(user_id: str) -> bool:
+    from app.real_interview.backend.auth.email_utils import find_user_by_id
+
+    doc = find_user_by_id(_get_collection(), user_id)
+    if not doc:
+        return False
+    # Default on: applies to existing accounts and past completed interviews.
+    if "ideal_answer_report_enabled" not in doc:
+        return True
+    return bool(doc.get("ideal_answer_report_enabled"))
+
+
+def set_ideal_answer_report_enabled(user_id: str, enabled: bool) -> Dict[str, Any]:
+    from app.real_interview.backend.auth.email_utils import find_user_by_id
+
+    doc = find_user_by_id(_get_collection(), user_id)
+    if not doc:
+        return _error(404, "user not found")
+
+    was_enabled = is_ideal_answer_report_enabled(user_id)
+    _get_collection().update_one(
+        {"_id": doc["_id"]},
+        {"$set": {"ideal_answer_report_enabled": bool(enabled)}},
+    )
+    if enabled and not was_enabled:
+        from app.real_interview.backend.services.ideal_answer_report_service import (
+            refresh_ideal_answers_for_completed_interviews,
+        )
+
+        refresh_ideal_answers_for_completed_interviews(user_id)
+    logger.info(
+        "[user_maintenance] set ideal_answer_report_enabled=%s user_id=%s",
+        bool(enabled),
+        user_id,
+    )
+    return _success(
+        200,
+        {
+            "message": "interview setting saved",
+            "ideal_answer_report_enabled": bool(enabled),
+        },
+    )
+

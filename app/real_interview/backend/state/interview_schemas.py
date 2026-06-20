@@ -66,3 +66,37 @@ class CandidatePostInterviewFeedback(BaseModel):
         description="Final decision: selected, not_selected, or hold.",
     )
     detailed_feedback: str = Field(default="")
+
+
+class IdealAnswerWebSource(BaseModel):
+    """Web reference cited in an ideal answer."""
+
+    title: str = Field(default="")
+    url: str = Field(default="")
+
+
+class IdealAnswerItem(BaseModel):
+    """Ideal response for one interviewer question."""
+
+    interviewer: str = Field(default="", description="Panel label e.g. I1")
+    question: str = Field(default="")
+    candidate_answer: str = Field(default="")
+    ideal_answer: str = Field(default="")
+    web_sources: List[IdealAnswerWebSource] = Field(default_factory=list)
+
+
+class IdealAnswersReport(BaseModel):
+    """Avatar agent output: best answers grounded in the candidate resume."""
+
+    avatar_summary: str = Field(
+        default="",
+        description="How the ideal candidate persona was derived from the resume.",
+    )
+    items: List[IdealAnswerItem] = Field(default_factory=list)
+
+
+class AvatarDiscussResponse(BaseModel):
+    """Single-turn ideal answer for Discuss with Avatar chat."""
+
+    ideal_answer: str = Field(default="")
+    web_sources: List[IdealAnswerWebSource] = Field(default_factory=list)
